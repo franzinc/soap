@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-aserve.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
+;; $Id: xmp-aserve.cl,v 2.3 2004/04/23 18:42:16 mm Exp $
 
 ;; Using AllegroServe as the transport layer.
 
@@ -242,7 +242,8 @@
 (defmethod xmp-message-send ((conn xmp-aserve-client-string-in-out-connector)
 				   &key headers &allow-other-keys)
   (multiple-value-bind (s rc)
-      (do-http-request
+      (apply 
+       'do-http-request
        (xmp-destination-url conn)
        :method (xmp-destination-method conn)
        :protocol (xmp-destination-http-protocol conn) 
@@ -253,7 +254,7 @@
 			  (when host `(("Host" . ,host))))
 			headers)
        :external-format (xmp-external-format conn)
-       )
+       (xmp-client-start conn))
     (case rc
       (200 s)
       (500 s)
@@ -272,7 +273,8 @@
 
 
 (defmethod xmp-start-server ((conn xmp-aserve-server-connector) 
-			     &key (start nil s-p) enable &allow-other-keys)
+			     &key new (start nil s-p) enable &allow-other-keys)
+  (when new (setf (xmp-aserve-server conn) (make-instance 'net.aserve:wserver)))
   (setf (xmp-aserve-server conn)
 	(apply 'start
 	       (append

@@ -3,6 +3,29 @@ join from acl62 to trunk on 2/12/04
 next join tag: use join2.sh
 *******************************************************************************
 
+2004-04-23    <mm@KETCHTOO>
+
+	* RELNOTES: add summary of changes
+	* xmp-wsdl.cl
+              (encode-wsdl=file): new function
+           (wsdl-bind-operation): assume top element always has parts
+                             output element is always "<operation>Response"
+           (wsdl-make-interface): add verbose argument
+           (wsdl-make-interface): server path should be uri-path
+           (wsdl-make-interface): intern vars in file-package
+	* xmp-soap.cl
+           (soap-message-server): add :start-new case for :enable arg
+             (xmp-begin-element): suppress error message for unknown
+                                response element or return element
+             (soap-find-element): accept elt def as well as name
+            ((enc:|float| xsd:|float|)): fix bug13943
+	* xmp-aserve.cl (xmp-start-server): add :new keyword arg
+	* xmp-base.cl (xmp-uri-to-package): always look in message-dns too
+                    (xmp-client-connector): add client-start slot
+	* soapex.cl (simple-server): add namespaces to this example
+	* xmp-aserve.cl (xmp-message-send): use client-start slot
+
+	
 2004-01-16  Kevin Layer  <layer@gemini>
 
 	* xmp-soap.cl: get version from ChangeLog
@@ -132,4 +155,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.2 $
+$Revision: 2.3 $

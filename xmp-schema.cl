@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-schema.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
+;; $Id: xmp-schema.cl,v 2.3 2004/04/23 18:42:16 mm Exp $
 
 ;; XML Schema support
 
@@ -26,9 +26,11 @@
 (defpackage :net.xmp
   (:export
    #:schema-collected-part
+   #:schema-collected-parts
    #:schema-simple-part
    #:schema-named-part
    #:schema-types
+   #:schema-elements
    #:schema-target
    #:schema-collect-target
    #:schema-file-connector
@@ -60,6 +62,7 @@
      "extension"
      "all"
      "base"
+     "import"
 
      ;; simpleType names (incomplete)
 
@@ -111,6 +114,7 @@
      "unsignedByte" 
      "positiveInteger"
 
+     "enumeration"
      ))
 
   (defpackage :net.xmp.schema-instance
@@ -145,6 +149,7 @@
    (groups     :accessor schema-groups     :initform (list nil))
    (a-groups   :accessor schema-a-groups   :initform (list nil))
    (context    :accessor schema-context    :initform nil)
+   (imports    :accessor schema-imports    :initform (list nil))
 
    (message-dns     :initform
 		    (list nil
@@ -161,19 +166,17 @@
 (defun decode-schema (file &key (verbose t))
   (let* ((conn (make-instance 'schema-file-connector :source file)))
 
-    (xmp-decode-message conn (xmp-parse-message conn file))
+    (xmp-decode-file conn file)
     (when verbose
       (format t "~&~%Elements:~%~S~%" (schema-elements conn))
       (format t "~%Types:~%~S~%" (schema-types conn))
       (format t "~%Attributes:~%~S~%" (schema-attributes conn))
       (format t "~%Groups:~%~S~%" (schema-groups conn))
-      (format t "~%AGroups:~%~S~2%" (schema-a-groups conn)))
+      (format t "~%AGroups:~%~S~2%" (schema-a-groups conn))
+      (format t "~%Imports:~%~S~2%" (schema-imports conn))
+      )
     conn))
 
-
-(defmethod xmp-parse-message ((conn schema-file-connector) source &key namespaces) 
-  (with-open-file (s source)
-		  (call-next-method conn s :namespaces namespaces)))
 
 (defmethod xmp-begin-message ((conn schema-file-connector))
   (list :seq1 'xs:|schema|))
@@ -187,22 +190,24 @@
 				       (:set* xs:|element| xs:|complexType| 
 					      xs:|attribute| xs:|simpleType| 
 					      xs:|attributeGroup| xs:|group|
+					      xs:|import|
 					      )))
 (define-xmp-element nil 'xs:|group|       '(:complex (:set* xs:|sequence|)))
 (define-xmp-element nil 'xs:|complexType|
   '(:complex
     (:set* xs:|sequence| xs:|any| xs:|annotation|
-	   xs:|anyAttribute| xs:|attributeGroup| 
-	   xs:|group| xs:|all|
+	   xs:|attribute| xs:|anyAttribute| xs:|attributeGroup| 
+	   xs:|group| xs:|all| xs:|choice| xs:|element|
 	   xs:|simpleContent|
 	   xs:|complexContent|
+	   (:any)          ;;;wsdl:element  occurs in Agni Find MP3 on xmethods
 	   )))
 (define-xmp-element nil 'xs:|attribute|      '(:complex
 					       (:set* xs:|simpleType| xs:|annotation|)))
 (define-xmp-element nil 'xs:|attributeGroup| '(:complex
 					       (:set* xs:|attribute| xs:|anyAttribute| 
 						      xs:|annotation|)))
-(define-xmp-element nil 'xs:|annotation|     '(:complex (:set* xs:|documentation|)))
+(define-xmp-element nil 'xs:|annotation|     '(:complex (:set* (:any))))
 
 
 (define-xmp-element nil 'xs:|all|           
@@ -220,9 +225,10 @@
 						      xs:|annotation|
 						      xs:|list|)))
 (define-xmp-element nil 'xs:|restriction|
-  '(:complex (:set* xs:|pattern| xs:|attribute|)))
+  '(:complex (:set* xs:|pattern| xs:|attribute| xs:|sequence| xs:|enumeration|)))
 (define-xmp-element nil 'xs:|simpleContent|  '(:complex (:set* xs:|extension|)))
-(define-xmp-element nil 'xs:|extension|      '(:complex (:set* xs:|attributeGroup|)))
+(define-xmp-element nil 'xs:|extension|
+  '(:complex (:set* xs:|sequence| xs:|attribute| xs:|attributeGroup|)))
 
 (define-xmp-element nil 'xs:|complexContent|
   '(:complex (:seq1 (:seq xs:|annotation|) (:or xs:|restriction| xs:|extension|))))
@@ -249,39 +255,21 @@
       (return found))))
 
 
-(defmethod schema-begin-part ((conn schema-file-connector) 
-			      tag1 attributes acc
-			      &aux (place (funcall acc conn)))
-  (let ((nameplus (schema-name-attr conn attributes)))
-    (push (list* tag1 nameplus) (schema-context conn))
-    (or (cdr (schema-context conn))
-	(add-to-list nameplus place))))
 
 
-(defmethod schema-update-content ((conn schema-file-connector) key data acc  
-				  &aux result
-				  (context (schema-context conn))
-				  (place (funcall acc conn))
-				  )
-  (when data (setf result (list data key)))
-  (if (null (cdr context))
-      (let* ((item (assoc (second (first context)) (cdr place) :test #'string-equal-ex)))
-	(dolist (d result) (push d (cdr item)))
-	(setf result nil))
-    (setf result (list (append (car context) (reverse result)))))
-  (pop (schema-context conn))
-  result)
+
+
 
 
 (defmethod xmp-complex-content ((conn schema-file-connector) 
 				(elt (eql 'xs:|annotation|))
 				data &rest options &key &allow-other-keys)
-  (list :annotation data))
+  (list (list :annotation data)))
 
 (defmethod xmp-complex-content ((conn schema-file-connector) 
 				(elt (eql 'xs:|documentation|))
 				data &rest options &key &allow-other-keys)
-  (list :documentation data))
+  (list (list :documentation data)))
 
 (defun drop-two (list tail &aux head)
   (do ((tl list (cddr tl)))
@@ -298,8 +286,10 @@
 	  (or (case (intern (symbol-name attr) :keyword)
 		((:|base| :|type|)
 		 (xmp-decode-qualified-name conn value nss))
-		((:|minOccurs| :|maxOccurs|)
-		 (parse-integer value))
+		(:|maxOccurs| (if (equal "unbounded" value)
+				  1000000
+				(parse-integer value)))
+		(:|minOccurs| (parse-integer value))
 		)
 	      (case attr
 		(otherwise value)))))
@@ -316,6 +306,11 @@
 
 (defmethod schema-name-attr ((conn schema-file-connector)
 				 attributes &optional key data not-qname)
+  ;; extract a schema element of the form <elt name="nn" type="tt" ... />
+  ;;
+  ;; and return a list of the form
+  ;;     (name [:type type] [key data] [:attributes attrs])
+
   (let* (tail
 	 (name (second (or (setq tail (member
 				       "name" attributes :test #'string-equal-ex))
@@ -337,7 +332,7 @@
 	  name
 	(let* ((targets (schema-target conn))
 	       (target (first targets))
-	       (tp (xmp-uri-to-package conn target :in))
+	       (tp (when target (xmp-uri-to-package conn target :in)))
 	       (*package* (resolve-package tp)))
 	  (if tp
 	      (xmp-decode-qualified-name conn name (cons (list target) :in))
@@ -349,7 +344,7 @@
 		       (schema-decode-attributes conn tail4 :in))))))
   
 
-
+#+ignore
 (defmethod xmp-complex-content ((conn schema-file-connector) 
 				(elt (eql 'xs:|element|)) data
 				&rest options &key attributes &allow-other-keys)
@@ -375,6 +370,44 @@
        (declare (ignore options))
        (schema-update-content conn ',tag data ',acc))))
 
+(defmethod schema-begin-part ((conn schema-file-connector) 
+			      tag1 attributes acc
+			      &aux (place (funcall acc conn)))
+  (let ((nameplus (schema-name-attr conn attributes)))
+    (push (list* tag1 nameplus) (schema-context conn))
+    (or (cdr (schema-context conn))
+	(add-to-list nameplus place))))
+
+(defmethod schema-update-content ((conn schema-file-connector) key data acc  
+				  &aux result
+				  (context (schema-context conn))
+				  (place (funcall acc conn))
+				  )
+  (setf result (list data key))
+  (if (null (cdr context))
+      (let* ((item (assoc (second (first context)) (cdr place) :test #'equal)))
+	(dolist (d result) (push d (cdr item)))
+	(setf result nil))
+    (setf result (list (append (car context) (reverse result)))))
+  (pop (schema-context conn))
+  result)
+
+(defmethod schema-collected-parts ((conn schema-file-connector) collection tag 
+				   &key key)
+  (let ((tail (cdr collection)) all)
+    (when (eq tag (first tail)) (pop tail))
+    (when (eq :attributes (first tail))
+      (pop tail) (pop tail))
+    (setf all (first tail))
+    (if key
+	(mapcan #'(lambda (item) (and (consp item) (eq key (first item))
+				      (list item)))
+		all)
+      all)))
+	 
+
+(schema-collected-part schema-file-connector
+		       xs:|element|     :element      schema-elements)
 (schema-collected-part schema-file-connector
 		       xs:|complexType| :complex-type schema-types)
 (schema-collected-part schema-file-connector
@@ -385,6 +418,8 @@
 		       xs:|group|       :group        schema-groups)
 (schema-collected-part schema-file-connector
 		       xs:|attributeGroup| :a-group   schema-a-groups)
+(schema-collected-part schema-file-connector
+		       xs:|import| :import   schema-imports)
 	
 
 (defmacro schema-nested-part (class elt tag)
@@ -400,10 +435,10 @@
 				     &rest options &key attributes &allow-other-keys)
        (declare (ignore options))
        (pop (schema-context conn))
-       (append (when attributes
-		 (list :attributes (schema-decode-attributes conn attributes :in)))
-	       (list :content (cons ',tag data))))
-     ))
+       (list
+	(append (when attributes
+		  (list :attributes (schema-decode-attributes conn attributes :in)))
+		(list :content (cons ',tag data)))))))
 
 ;; ??? minOccurs maxOccurs attributes may apply
 ;;     xs:|sequence|   min=0  max=Unbounded default=1
@@ -418,10 +453,11 @@
 				data
 				&rest options &key attributes &allow-other-keys)
   (declare (ignore options))
-  (list* :complex-content
-	 (append (when attributes
-		   (list :attributes (schema-decode-attributes conn attributes :in)))
-		 data)))
+  (list
+   (list* :complex-content
+	  (append (when attributes
+		    (list :attributes (schema-decode-attributes conn attributes :in)))
+		  data))))
 
 
 (defun collect-schema-parts (conn tag attributes data)
@@ -479,7 +515,7 @@
 (schema-simple-part schema-file-connector xs:|any|           :any)
 (schema-simple-part schema-file-connector xs:|anyAttribute|  :any-attribute)
 (schema-simple-part schema-file-connector xs:|list|          :list)
-
+(schema-simple-part schema-file-connector xs:|enumeration|   :enumeration)
 
 
 (defmethod xmp-complex-content ((conn schema-file-connector) 
@@ -490,9 +526,10 @@
   nil)
 
 (defmethod xmp-complex-content ((conn schema-file-connector) (elt t) data
-				&rest options &key attributes &allow-other-keys)
+				&rest options &key attributes (warn t) 
+				&allow-other-keys)
   (declare (ignore options))
-  (format t "~&;; Undefined element ~S~%" elt)
+  (when warn (format t "~&;; Undefined element ~S~%" elt))
   (list (list* (if attributes
 		   (concatenate
 		    'vector

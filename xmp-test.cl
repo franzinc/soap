@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
+;; $Id: xmp-test.cl,v 2.3 2004/04/23 18:42:16 mm Exp $
 
 ;; Internal-use test cases
 
@@ -51,9 +51,9 @@
      s)))
 
 
-(defclass ct1 (xmp-string-in-connector) ())
-(defmethod xmp-begin-message ((conn ct1)) (list :seq1 (list :or :ct1 :ct2)))
-(defmethod xmp-end-message ((conn ct1) data &key types &allow-other-keys)
+(defclass ct1 (net.xmp:xmp-string-in-connector) ())
+(defmethod net.xmp:xmp-begin-message ((conn ct1)) (list :seq1 (list :or :ct1 :ct2)))
+(defmethod net.xmp:xmp-end-message ((conn ct1) data &key types &allow-other-keys)
   (values data types))			       
 (net.xmp:define-xmp-element nil :ct1 '(:complex 
 				       (:or 
@@ -154,7 +154,7 @@
 (defparameter *base-dns-tail*
   (list 
    (list :net.xmp.schema
-	 "xs"
+	 "xsd"
 	 "http://www.w3.org/2001/XMLSchema")
    (list :net.xmp.schema-instance
 	 "xsi"
@@ -174,6 +174,28 @@
 	 "urn:GoogleSearch")
    *base-dns-tail*))
 
+
+(defun wsdl-all (&key (root "./WSDL-files") index &aux (i 0) res)
+  (flet ((do-one (i file)
+		 (multiple-value-bind (vals e)
+		     (ignore-errors
+		      (multiple-value-list
+		       (decode-wsdl-file file 
+					 :namespaces '(nil (:prefix "tn") . :guess)
+					 )))
+		   (format t "~&~A. ~A ~S~%" i file (or e (first vals)))
+		   (push (list i file (or e :ok)) res)
+		   (or e
+		       (format t "~&~{   ~S~%~}" (cdr vals))))))
+    (dolist (file (directory (concatenate 'string root "/*.xml")))
+      (when (or (null index) (eql index i))
+	(do-one i file))
+      (incf i))
+    (dolist (file (directory (concatenate 'string root "/*.wsdl")))
+      (when (or (null index) (eql index i))
+	(do-one i file))
+      (incf i))
+   res ))
 
 (defun wsdl01 (&optional (file "Atest.xml")
 			verbose
@@ -198,33 +220,50 @@
 	 
 
 
-(defun wsdl11 (&optional verbose) (wsdl01 "Atest.xml" verbose))
 (defun wsdl21 (&optional verbose) (wsdl01 "AmazonWebServices.xml" verbose))
-(defun wsdl31 (&optional verbose) (wsdl01 "AmazonWSDLm.xml" verbose)) 
 
-(defun wsdl41 (&optional verbose)
-  (wsdl01 "c:/franz/_current/soap/googleapi/GoogleSearch.wsdl" verbose *google-dns*))
+(defun wsdl22 (&optional verbose eval (dest t))
+  (make-client-interface (wsdl21 verbose) 0 dest :eval eval))
 
-(defun wsdl51 (&optional verbose eval (dest t) &aux sv)
-  (net.xmp.soap::make-client-interface (wsdl41 verbose) 0 dest :eval eval))
-(defun wsdl52 (&optional verbose (eval t) (dest t))
-  (net.xmp.soap::make-server-interface (wsdl41 verbose) 0 dest :eval eval))
-(defun wsdl53 (&optional verbose (eval t) (dest t))
-  (net.xmp.soap::make-server-interface (wsdl41 verbose) 0 dest :eval eval)
+(defun wsdl25 (&optional verbose (eval t) (dest "amazon.cl") &aux sv)
+  (make-server-interface (wsdl21 verbose) 0 dest :eval eval)
   (values
+   dest
    (setf sv (funcall 'make-server))
-   (net.xmp.soap::encode-wsdl-file "tmp.wsdl" :servers sv)))
+   (encode-wsdl-file "amazon.wsdl" :servers sv
+		     :namespaces *amazon-dns*
+		     :name "AmazonSearch"
+		     :target (third (second *amazon-dns*))
+		     )))
 
-(defun wsdl61 (&optional verbose eval)
-  (net.xmp.soap::make-client-interface
-   (wsdl01 "c:/franz/_current/soap/googleapi/GoogleSearch.wsdl" verbose
-	  (list* nil *base-dns-tail*))
+;; This version was needed to workaround xmlns="" problem
+;;(defun wsdl31 (&optional verbose) (wsdl01 "amazon.xml" verbose)) 
+
+
+(defun wsdl41 (&optional verbose) (wsdl01 "google.xml" verbose *google-dns*))
+
+(defun wsdl42 (&optional verbose eval (dest t))
+  (make-client-interface (wsdl41 verbose) 0 dest :eval eval))
+(defun wsdl43 (&optional verbose (eval t) (dest t))
+  (make-server-interface (wsdl41 verbose) 0 dest :eval eval))
+
+(defun wsdl45 (&optional verbose (eval t) (dest "google.cl") &aux sv)
+  (make-server-interface (wsdl41 verbose) 0 dest :eval eval)
+  (values 
+   dest
+   (setf sv (funcall 'make-server))
+   (encode-wsdl-file "google.wsdl" :servers sv
+		     :namespaces *google-dns*
+		     :name "GoogleSearch"
+		     :target (third (second *google-dns*))
+		     )))
+
+;; this call generates a warning because a package is not defined
+(defun wsdl49 (&optional verbose eval)
+  (make-client-interface
+   (wsdl01 "google.xml" verbose (list* nil *base-dns-tail*))
    0 t :eval eval))
 
-(defun wsdl71 (&optional verbose eval (dest t))
-  (net.xmp.soap::make-client-interface (wsdl21 verbose) 0 dest :eval eval))
-(defun wsdl81 (&optional verbose eval (dest t))
-  (net.xmp.soap::make-client-interface (wsdl31 verbose) 0 dest :eval eval))
 
 
 

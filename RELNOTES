@@ -1,0 +1,45 @@
+
+
+
+2004-04-23    <mm@KETCHTOO>
+
+  New features: 
+   - generate a WSDL file from the Lisp definition of a service
+   - examine the namespace configuration in a WSDL file and
+       choose a namespace-to-package mapping
+
+  Enhancements and corrections:
+   - we can now parse and generate interfaces for  149 of 157 RPC 
+       definitions on xmethods.com
+   - summary information in generated client or server file 
+   - soap-message-client can now specify a proxy
+
+Details:
+	
+soap-message-client    NEW keyword argument: start   
+
+soap-message-server    NEW keyword arguments: name service-name url port-name 
+                                              binding-name
+
+NEW accessors for soap-connector
+   soap-port-name
+   soap-binding-name
+   soap-service-name
+
+enable-soap-server server &key &allow-other-keys
+
+disable-soap-server server &key &allow-other-keys
+
+start-soap-server server &key new start enable &allow-other-keys
+
+stop-soap-server  server &key disable &allow-other-keys
+
+wsdl-server-names wsdl-file-connector
+
+make-client-interface    make-server-interface
+   NEW keyword arguments: port if-missing-package
+
+encode-wsdl-file file &key namespaces servers target name (if-exists :supersede)
+
+decode-wsdl-namespaces &key file string uri other-pk base-ns
+

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapval1.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: soapval1.cl,v 2.2 2004/04/23 18:42:16 mm Exp $
 
 ;; SOAP server example
 ;; This example may be submitted to the SOAP validator at http://www.soapware.org/
@@ -246,6 +246,12 @@
 			:lisp-name 'validator1-toolkit
 			:return "whichToolkitResult")
 
+    ;; Additonal tests not called from web validator
+    (soap-export-method s "manyTypesTest2" 
+			(list "num" "bool" "state" "doub" "dat" "bin")
+			:lisp-name 'validator1-many-types2
+			:return "manyTypesTestResult")
+
     s))
 
 
@@ -293,6 +299,9 @@
 		    :|month04| (list :|day01| (list :|moe| 1 :|larry| 2 :|curly| 3)))))
        (call 6 "simpleStructReturnTest" :|myNumber| 123)
        (call 7 "whichToolkit")
+       (call 8 "manyTypesTest2"
+	     :|num| 17 :|bool| t :|state| "a string" :|doub| 4.5 :|dat| 12345
+	     :|bin| "string to encode")
        ))))
 
 
@@ -368,5 +377,33 @@
 
 
 
+
+
+;;; ADDITIONAL TESTS not called from web validator
+
+(define-soap-element nil "manyTypesTest2"
+  '(:complex
+    (:seq
+     (:element "num" xsd:|int|)
+     (:element "bool" xsd:|boolean|)
+     (:element "state" xsd:|string|)
+     (:element "doub"  xsd:|float|)
+     (:element "dat"   xsd:|string|)
+     (:element "bin"   xsd:|string|))))
+(define-soap-type nil :struct-of-2 '(:complex (:set (:element "foo" xsd:|string|)
+						    (:element "bar" xsd:|string|))))
+
+(defun validator1-many-types2 (&key |num| |bool| |state| |doub| |dat| |bin|)
+  (list "Result"
+	(list
+	 (list 'xsd:|int|      |num|)
+	 (list 'xsd:|boolean|  |bool|)
+	 (list 'xsd:|string|   |state|)
+	 (list 'xsd:|float|    |doub|)
+	 (list 'xsd::|timeInstant| |dat|)
+	 (list 'xsd:|string|       |bin|)
+	 (list :struct-of-2
+	       (list :foo "abc" :bar "def"))
+	 )))
 
 

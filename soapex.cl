@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapex.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: soapex.cl,v 2.2 2004/04/23 18:42:16 mm Exp $
 
 ;; SOAP client examples
 
@@ -414,44 +414,88 @@
 
 
 
+(defparameter *soap-dns* 
+  (list nil
+	 (list :net.xmp.schema-instance
+	       "xsi"
+	       "http://www.w3.org/2001/XMLSchema-instance")
+	 (list :net.xmp.schema
+	       "xsd"
+	       "http://www.w3.org/2001/XMLSchema")
+	 (list :net.xmp.soap.envelope
+	       "soap"
+	       "http://schemas.xmlsoap.org/soap/envelope/")
+	 (list :net.xmp.soap.encoding
+	       "SOAP-ENC"
+	       "http://schemas.xmlsoap.org/soap/encoding/")
+	 ))
+(defpackage :ts (:use))
 (define-soap-element nil "testServer"
   '(:complex (:seq* (:any))
 	     :action "ACLSOAP"
+	     ))
+(define-soap-element nil 'ts::testServer1
+  '(:complex (:seq* (:any))
+	     :action "ACLSOAP"
+	     :namespaces '(nil (:ts "ts" "tsNamespace"))
+	     ))
+(define-soap-element nil 'ts::testServer2
+  '(:complex (:seq* (:any))
+	     :action "ACLSOAP"
+	     :namespaces '("tsNamespace" (:ts "ts" "tsNamespace"))
 	     ))
 
 (defun simple-server (&key (port 4567)
 			   (server-action "ACLSOAP")
 			   (method-action :default)
 			   (client-action server-action) 
-			   )
-  (let ((host "localhost")
-	(path "/ACL-SOAP")
-	)
-    (let ((s (soap-message-server
-	      :start (list :port port) :enable :start
-	      :publish `(:path ,path)
-	      :action server-action
-	      :lisp-package :keyword
-	      )))
+			   (ns 0)
+			   verbose
+			   ) 
+  (unwind-protect
+      (let* ((host "localhost")
+	    (path "/ACL-SOAP")
+	    (ns (case ns ((0 1 2) ns) (otherwise 0)))
+	    (message (elt '("testServer" ts::|testServer1| ts::|testServer2|) ns))
+	    (reply   (elt '(:|sResponse|  ts::|sResponse1|   ts::|sResponse2|) ns)) 
+	    (msgns   (elt '(nil
+			    (nil (:ts "ts" "tsNamespace"))
+			    ("tsNamespace" (:ts "ts" "tsNamespace")))
+			  ns))
+	    )
+	(when verbose
+	  (trace net.xml.parser:parse-xml))
+	(let ((s (soap-message-server
+		  :start (list :port port) :enable :start
+		  :publish `(:path ,path)
+		  :action server-action
+		  :lisp-package :keyword
+		  :message-dns (append (list nil) (cdr msgns) (cdr *soap-dns*))
+		  )))
 
-      (soap-export-method s "testServer" (list :|a| :|b| :|c|)
-			  :lisp-name 'simple-server-1
-			  :action method-action
-			  :return '(:element "sResponse" xsd:|string|))
-      (sleep 1))
+	  (soap-export-method s message (list :|a| :|b| :|c|)
+			      :lisp-name 'simple-server-1
+			      :action method-action
+			      :return `(:element ,reply
+						 (:simple xsd:|string|
+							  :namespaces ,msgns)))
+	  (sleep 1))
     
-    (let ((c (soap-message-client :url (format nil "http://~A:~A~A"
-					       host port path)
-				  :lisp-package :keyword
-				  )))
-      (equal
-       '(:|sResponse| "123")
-       (call-soap-method c 
-			 `(:element "testServer"
-				    (:complex (:seq* (:any))
-					      :action ,client-action
-					      ))  
-			 "a" 1 "b" 2 "c" 3)))))
+	(let ((c (soap-message-client :url (format nil "http://~A:~A~A"
+						   host port path)
+				      :lisp-package :keyword
+				      )))
+	  (equal
+	   (list reply "123")
+	   (call-soap-method c 
+			     `(:element ,message
+					(:complex (:seq* (:any))
+						  :action ,client-action
+						  :namespaces ,msgns
+						  ))  
+			     "a" 1 "b" 2 "c" 3))))
+    (when verbose
+      (untrace net.xml.parser:parse-xml))))
 
 (defun simple-server-1 (&key |a| |b| |c|) (concatenate 'string |a| |b| |c|))
 

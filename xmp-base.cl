@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
+;; $Id: xmp-base.cl,v 2.3 2004/04/23 18:42:16 mm Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -120,6 +120,7 @@
    xmp-server-exports
    xmp-server-enabled
    xmp-server-start
+   xmp-client-start
    xmp-message-dns
    xmp-lisp-package
    xmp-trim-whitespace
@@ -130,6 +131,15 @@
    xmp-fault-string
    xmp-fault-factor
    xmp-fault-detail
+
+   nsd-package
+   nsd-prefix
+   nsd-uri 
+   make-nsd
+   nse-default
+   nse-defs
+   make-nse
+   make-nse* 
 
    ;; Generic functions
    define-xmp-type
@@ -150,7 +160,9 @@
    xmp-encode-end
    xmp-message-send
    xmp-decode-message
+   xmp-decode-string
    xmp-parse-message
+   xmp-parse-file
    xmp-decode
    xmp-begin-message
    xmp-begin-element
@@ -194,6 +206,8 @@
    xmp-warning-leader
    xmp-match-name
    xmp-getf
+   xmp-uri-to-prefix
+   xmp-add-dns-entry
 
    ;; Ordinary functions
    encode-base64-string
@@ -203,14 +217,19 @@
    string-equal-ex
    xmp-merge-nses
    xmp-version
+   xmp-resolve-uri
 
    ;; Macros
    
    ;; Variables
    *xmp-server*
    *xmp-debug*
+   *xmp-warning-leader*
 
    ))
+
+;; A package for reserved XML names
+(defpackage :net.xmp.xml (:use))
 
 
 (defvar *xmp-debug* t)
@@ -286,7 +305,9 @@
 
 
 (defclass xmp-client-connector (xmp-connector) 
-  ((role :initform :client)))
+  ((role :initform :client)
+   (client-start :accessor xmp-client-start :initform nil :initarg :start)
+   ))
 
 (defclass xmp-server-connector (xmp-connector) 
   ((role :initform :server)
@@ -297,8 +318,9 @@
    (server-enabled :accessor xmp-server-enabled :initform nil)
    (server-start   :accessor xmp-server-start   :initarg :start :initform nil)
    (exports     
-    ;; key is string that names an exported method
-    ;; value -> ((signature return-type lisp-function enabled) ... )
+    ;; key is symbol or string that names an exported method
+    ;; value is list of hash-tables
+    ;; hash value -> ((signature return-type lisp-function enabled) ... )
     :accessor xmp-server-exports :initform (xmp-make-tables nil))
    ))
 
@@ -623,13 +645,17 @@
 	   )
       (cond ((not (eql 0 (search "xmlns" name))))
 	    ((eql 5 (length name)) 
-	     (if (null nse) 
-		 (setf nse (list uri))
-	       (setf (first nse) uri)))
+	     (when (nse-default nse)
+	       (error "multiple default namespace declarations ~S ~S"
+		      nse uri))
+	     (setf nse (make-nse* uri (if nse (nse-defs nse) nil))))
 	    ((eql 6 (length name)))
-	    (t (or nse (setf nse (list nil)))
-	       (push (list (xmp-package-of-uri conn uri) (subseq name 6) uri)
-		     (cdr nse)))))))
+	    (t (setf nse (make-nse* (when nse (nse-default nse))
+				    (make-nsd (xmp-package-of-uri conn uri)
+					      (subseq name 6)
+					      uri)
+				    (when nse (nse-defs nse))))))
+      )))
 
 
 (defun string-equal-ex (x y &optional ignored-last-char)
@@ -653,20 +679,25 @@
 		      ))))
 	)))))
 
-(defun same-uri (x y)
-  (typecase x 
-    (net.uri:uri 
-     (typecase y 
-       (net.uri:uri (return-from same-uri (net.uri:uri= x y)))
-       (otherwise (rotatef x y)))))
-  (typecase y
-    (net.uri:uri (setf y (or (net.uri::uri-string y)
-			     (format nil "~A" y)))))
-  ;;(format t "~&same-uri ~S ~S~%" x y)
-  (string-equal-ex x y #\/))
+(defun uri-to-string (x &aux xs)
+  (etypecase (setf xs (normal-uri x))
+    (net.uri:uri (or (net.uri::uri-string xs)
+		     (format nil "~A" xs)))
+    (string xs)))
 
-(defmethod xmp-package-of-uri ((conn xmp-connector) uri &aux e)
-  (when (setf e (assoc uri (xmp-message-pns conn) :test 'same-uri))
+(defun normal-uri (x &aux xu)
+  (etypecase x 
+    (net.uri:uri x)
+    (string (if (setf xu (ignore-errors (net.uri:parse-uri x)))
+		xu
+	      x))))
+
+(defun same-uri (x y)
+  (string-equal-ex (uri-to-string x) (uri-to-string y) #\/))
+
+(defmethod xmp-package-of-uri ((conn xmp-connector) uri &aux e canonical)
+  (setf canonical (normal-uri uri))
+  (when (setf e (assoc canonical (xmp-message-pns conn) :test 'same-uri))
     (cdr e)))
 
 
@@ -696,8 +727,11 @@
    (when (or (setf def (xmp-find-element conn elt :in))
 	     (setf def (xmp-find-type conn elt :in)))
      (etypecase def
+       ((or string symbol)
+	(return-from xmp-simple-content
+	  (apply 'xmp-simple-content conn def data options)))
        (cons
-	(ecase (first def)
+	(case (first def)
 	  (:simple
 	   (cond ((second def)
 		  (return-from xmp-simple-content
@@ -706,7 +740,11 @@
 		  (when (not (eq key elt))
 		    (return-from xmp-simple-content
 		      (apply 'xmp-simple-content conn key data options))))
-		 ))))))
+		 ))
+	  (otherwise 
+	   (xmp-error conn :client :string (list "Expected: ~S  Found simple string: ~S" 
+						 def data)))
+	  ))))
 			 
    ;; default content is the parsed XML string content
    ;;(format t "~&;;xmp-simple-content ~S~%" elt)
@@ -872,26 +910,90 @@
   (when tag2 (xmp-encode-end conn tag2))
   (when tag1 (xmp-encode-end conn tag1)))
 
+
+;;(defstruct nsd (package prefix uri))
+(defun nsd-package (nsd) (first nsd))
+(defun nsd-prefix (nsd) (second nsd))
+(defun nsd-uri (nsd) (third nsd))
+(defun make-nsd (package prefix uri) (list package prefix uri))
+
+;;(defstruct nse (default defs))
+(defun nse-default (nse) (first nse))
+(defun nse-defs (nse) (cdr nse))
+(defun make-nse (default &rest defs) (cons default (append defs nil)))
+(defun make-nse* (default &rest defs*)
+  (cond ((null defs*) (list default))
+	((null (cdr defs*)) (cons default (append (first defs*) nil)))
+	(t (append (list default)
+		   (butlast defs*)
+		   (first (last defs*))
+		   nil))))
+
+(defun nss-top (nss) (first nss))
+(defun nss-tail (nss) (cdr nss))
+(defun make-nss (top &rest more) (append (list top) more nil))
+(defun make-nss* (top &rest more*)
+  (cond ((null more*) (list top))
+	((null (cdr more*)) (cons top (append (first more*) nil)))
+	(t (append (list top)
+		   (butlast more*)
+		   (first (last more*))
+		   nil))))
+
+(defmethod xmp-add-dns-entry ((conn xmp-connector) nsd)
+  ;; update message-dns in-nss out-nss
+  (let* ((pk (nsd-package nsd))
+	 (pf (nsd-prefix nsd))
+	 (ur (nsd-uri nsd))
+	 (pkn (typecase pk
+		(package (package-name pk))
+		((or string symbol) pk)))
+	 )
+    (let ((dns (xmp-message-dns conn)))
+      (setf (xmp-message-dns conn)
+	    (make-nse* (nse-default dns)
+		       (make-nsd pkn pf ur)
+		       (nse-defs dns))))
+    (dolist (nss (list (xmp-in-nss conn) (xmp-out-nss conn)))
+      (when nss
+	(typecase pk
+	  (package nil)
+	  ((or string symbol) 
+	   (setf pk (or (find-package pk)
+			(error "cannot find package ~A" pk)))))
+	(setf nss (last nss))
+	(setf (first nss)
+	      (make-nse* (nse-default (first nss))
+			 (make-nsd pk pf ur)
+			 (nse-defs (first nss))))))
+    ))
+
 (defmethod xmp-translate-nss ((conn xmp-connector) nss)
   (etypecase nss
     ((member :in) (xmp-in-nss conn))
     ((member :out) (xmp-out-nss conn))
-    ((member :dns) (list (xmp-normal-nse (xmp-message-dns conn))))
+    ((member :dns) (make-nss (xmp-normal-nse (xmp-message-dns conn))))
     ((member nil) nil)
-    (cons (cons (xmp-normal-nse (first nss)) (xmp-translate-nss conn (cdr nss))))))
+    (cons (make-nss* (xmp-normal-nse (nss-top nss))
+		     (xmp-translate-nss conn (nss-tail nss))))))
 
 (defmethod xmp-uri-to-package ((conn xmp-connector) uri nss &aux e)
   (setf nss (xmp-translate-nss conn nss))
-  (dolist (nse nss)
-    (when (setf e (member uri (cdr nse) :test 'same-uri :key 'third))
-      (setf e (first (first e)))
-      (return e))))
+  (dolist (nse nss
+	       ;; if we do not find the package in the current environment
+	       ;;    look in the defined namespaces too
+	       (when (setf e (member uri (nse-defs (xmp-message-dns conn))
+				     :test 'same-uri :key 'nsd-uri))
+		 (nsd-package (first e)))
+	       )
+    (when (setf e (member uri (nse-defs nse) :test 'same-uri :key 'nsd-uri))
+      (return (nsd-package (first e))))))
 
 (defmethod xmp-uri-to-prefix ((conn xmp-connector) uri nss &aux e)
   (setf nss (xmp-translate-nss conn nss))
   (dolist (nse nss)
     (when (setf e (member uri (cdr nse) :test 'same-uri :key 'third))
-      (setf e (second (first e)))
+      (setf e (nsd-prefix (first e)))
       (return e))))
 
 (defmethod xmp-prefix-to-package ((conn xmp-connector) prefix nss &aux e)
@@ -899,11 +1001,12 @@
   (when (equal prefix "") (setf prefix nil))
   (dolist (nse nss)
     (if (null prefix)
-	(when (first nse)
-	  (return (xmp-uri-to-package conn (first nse) nss)))
-      (when (setf e (member prefix (cdr nse) :test 'equal :key 'second))
-	(setf e (first (first e)))
-	(return e)))))
+	(case (nse-default nse)
+	  (:none (return nil))
+	  ((nil) nil)
+	  (otherwise (return (xmp-uri-to-package conn (nse-default nse) nss))))
+      (when (setf e (member prefix (nse-defs nse) :test 'equal :key 'nsd-prefix))
+	(return (nsd-package (first e)))))))
 
 (defmethod xmp-package-to-prefix ((conn xmp-connector)  pk nss &aux prefixes e d)
   (setf nss (xmp-translate-nss conn nss))
@@ -911,24 +1014,30 @@
       (when (null pk) (setf pk *package*))
       (when (setf e (find-package pk)) (setf pk e)))
   (dolist (nse nss)
-    (or d (setf d (first nse)))
-    (dolist (e (cdr nse))
-      (if (eq pk (first e))
-	  (if (same-uri d (third e))
-	      (return-from xmp-package-to-prefix (values "" (second e)))
-	    (if (member (second e) prefixes :test #'equal)
+    (or d 
+	(case (setf d (nse-default nse))
+	  (:none (setf d nil))))
+    (dolist (e (nse-defs nse))
+      (if (eq pk (nsd-package e))
+	  (if (and d (same-uri d (nsd-uri e)))
+	      (return-from xmp-package-to-prefix (values "" (nsd-prefix e)))
+	    (if (member (nsd-prefix e) prefixes :test #'equal)
 		(xmp-error 
 		 :namespace
 		 :string
 		 (list
 		  "Namespace prefix ~A of package ~A is masked."
-		  (second e) (package-name pk)))
-	      (return-from xmp-package-to-prefix (second e))))
-	(push (second e) prefixes)))))
+		  (nsd-prefix e) (package-name pk)))
+	      (return-from xmp-package-to-prefix (nsd-prefix e))))
+	(push (nsd-prefix e) prefixes)))))
 
 (defmethod xmp-default-uri ((conn xmp-connector) nss)
   (setf nss (xmp-translate-nss conn nss))
-  (dolist (nse nss) (when (first nse) (return (first nse)))))
+  (dolist (nse nss)
+    (case (nse-default nse)
+      (:none (return nil))
+      ((nil) nil)
+      (otherwise (return (nse-default nse))))))
 
 (defmethod xmp-default-package ((conn xmp-connector) nss &aux e)
   (when (setf e (xmp-default-uri conn nss)) (xmp-uri-to-package conn e nss)))
@@ -955,14 +1064,16 @@
 		   (subseq data (1+ qp))
 		 data))
 	 pk)
-    (if (setf pk (xmp-prefix-to-package conn prefix nss))
-	(values (setf name (intern name pk)) name)
-      (if qp
-	  (xmp-error conn :decode 
-		     :string (list "Unknown namespace in qualified name ~A" data))
-	(values
-	 (intern name (or (xmp-lisp-package conn) *package*))
-	 name)))))
+    (cond ((string-equal prefix "xml")
+	   (values (intern name (find-package :net.xmp.xml)) name))
+	  ((setf pk (xmp-prefix-to-package conn prefix nss))
+	   (values (setf name (intern name pk)) name))
+	  (qp (xmp-error
+	       conn :decode 
+	       :string (list "Unknown namespace in qualified name ~A" data)))
+	  (t (values
+	      (intern name (or (xmp-lisp-package conn) *package*))
+	      name)))))
 
 
 (defmethod xmp-encode-qualified-name ((conn xmp-string-out-connector)
@@ -980,13 +1091,18 @@
 	(xmp-encode-content conn ":" :sanitize nil))
     (xmp-encode-content conn (symbol-name data) :sanitize sanitize)))
 
-(defmethod xmp-encoded-qualified-name ((conn xmp-string-out-connector)
+(defmethod xmp-encode-qualified-name ((conn xmp-connector)
+				      (data t) nss &key sanitize)
+  (xmp-encode-content
+   conn (xmp-encoded-qualified-name conn data nss :sanitize sanitize)))
+
+(defmethod xmp-encoded-qualified-name ((conn xmp-connector)
 				       (data string) (nss t) &key sanitize)
   (if sanitize
       (xmp-content-string conn data :sanitize sanitize)
     data))
 
-(defmethod xmp-encoded-qualified-name ((conn xmp-string-out-connector)
+(defmethod xmp-encoded-qualified-name ((conn xmp-connector)
 				       (data symbol) nss &key sanitize)
   (xmp-content-string
    conn 
@@ -1001,41 +1117,50 @@
 
 	  
 (defun xmp-normal-nse (nse)
-  (or (and (typecase (first nse) (string t) ((member nil) t))
-	   (dolist (nse (cdr nse) nse)
-	     (or (xmp-normal-nsd nse t) (return nil))))
-      (list* (etypecase (first nse)
-	       (string (first nse))
-	       ((member nil) nil))
-	     (mapcar 'xmp-normal-nsd (cdr nse)))))
+  (or (and (typecase (nse-default nse) (string t) ((member nil) t))
+	   (dolist (nsd (nse-defs nse) nse)
+	     (or (xmp-normal-nsd nsd t) (return nil))))
+      (make-nse* (etypecase (nse-default nse)
+		   (string (nse-default nse))
+		   ((member :none) :none)
+		   ((member nil) nil))
+		 (mapcar 'xmp-normal-nsd (nse-defs nse)))))
 
 (defun xmp-merge-nses (nse1 nse2 &rest more)
-  (let ((nse3 (list* (or (first nse1) (first nse2))
-		     (append (cdr nse1) (cdr nse2)))))
+  (let (tail seen (nse3 (make-nse* (or (nse-default nse1) (nse-default nse2))
+				   (append (nse-defs nse1) (nse-defs nse2)))))
     (if more
 	(apply #'xmp-merge-nses nse3 more)
-      nse3)))
+      ;; Finally, trim out useless (duplicate trailing) prefixes
+      (dolist (nsd (nse-defs nse3) (make-nse* (nse-default nse3) (reverse tail)))
+	(cond ((null (nsd-prefix nsd))
+	       (error "namespace without a prefix ~S" nsd))
+	      ((member (nsd-prefix nsd) seen :test #'equal))
+	      (t (push (nsd-prefix nsd) seen)
+		 (push nsd tail)))))))
 
 
 (defun xmp-normal-nsd (nsd &optional test-only)
-  (or (and (typecase (first nsd) (package t))
-	   (typecase (second nsd) ((or string symbol) t))
+  (or (and (typecase (nsd-package nsd) (package t))
+	   (typecase (nsd-prefix nsd) ((or string symbol) t))
 	   nsd)
       (if test-only
 	  nil
-	(list (etypecase (first nsd)
-		(package (first nsd))
-		((or string symbol) 
-		 (or (find-package (first nsd))
-		     (xmp-error
-		      nil :def
-		      :string
-		      (list
-		       "Cannot find-package in NameSpace spec ~S"
-		       nsd)))))
-	      (etypecase (second nsd)
-		((or string symbol) (second nsd)))
-	      (third nsd)))))
+	(make-nsd
+	 (etypecase (nsd-package nsd)
+	   (package (nsd-package nsd))
+	   (null nil)
+	   ((or string symbol) 
+	    (or (find-package (nsd-package nsd))
+		(xmp-error
+		 nil :def
+		 :string
+		 (list
+		  "Cannot find-package in NameSpace spec ~S"
+		  nsd)))))
+	 (etypecase (nsd-prefix nsd)
+	   ((or string symbol) (nsd-prefix nsd)))
+	 (nsd-uri nsd)))))
 	
 (defmethod xmp-encode-attribute ((conn xmp-string-out-connector)
 				 prefix suffix name value qname)
@@ -1053,11 +1178,15 @@
   (push (xmp-normal-nse namespaces) (xmp-out-nss conn))
   (xmp-encode-content conn "<" :sanitize nil)
   (xmp-encode-qualified-name conn data :out)
-  (when (first namespaces)
-    (xmp-encode-attribute conn "xmlns" nil nil (first namespaces) nil))
-  (dolist (nse (cdr namespaces))
-    (when (second nse)
-      (xmp-encode-attribute conn "xmlns:" (second nse) nil (third nse) nil)))
+  (when (nse-default namespaces)
+    (xmp-encode-attribute conn "xmlns" nil nil
+			  (case (nse-default namespaces)
+			    (:none "")
+			    (otherwise (nse-default namespaces)))
+			  nil))
+  (dolist (nsd (nse-defs namespaces))
+    (when (nsd-prefix nsd)
+      (xmp-encode-attribute conn "xmlns:" (nsd-prefix nsd) nil (nsd-uri nsd) nil)))
   (do ((tl attributes (cddr tl)))
       ((atom tl))
     (xmp-encode-attribute conn nil nil (first tl) (second tl) t))
@@ -1069,16 +1198,20 @@
 
 (defmethod xmp-encode-string ((conn xmp-string-out-connector) data 
 			      &key qname (nss :out) sanitize)
-  (let ((del "'"))
-    (when (position #\' (string data))
-      (when (position #\" (string data))
-	(xmp-error 
-	 conn :encode :string "String contains both single and double quotes."))
-      (setf del "\""))
+  (let (del
+	(string (typecase data
+		  (string data)
+		  (symbol (symbol-name data))
+		  (otherwise (format nil "~A" data))))
+	)
+    (cond ((null (position #\" string)) (setf del "\""))
+	  ((null (position #\' string)) (setf del "\'"))
+	  (t (xmp-error 
+	      conn :encode :string "String contains both single and double quotes.")))
     (xmp-encode-content conn del)
-    (if qname
+    (if (and qname (symbolp data))
 	(xmp-encode-qualified-name conn data nss :sanitize sanitize)
-      (xmp-encode-content conn data :sanitize sanitize))
+      (xmp-encode-content conn string :sanitize sanitize))
     (xmp-encode-content conn del)))
 
 
@@ -1101,10 +1234,11 @@
       (push (first tl) keep)
       (push (second tl) keep))))
 
-(defmethod xmp-warning-leader ((conn t)) "XMP Warning")
+(defvar *xmp-warning-leader* "XMP")
+(defmethod xmp-warning-leader ((conn t)) *xmp-warning-leader*)
 (defmethod xmp-warning-leader ((conn string)) conn)
 (defmethod xmp-warning ((conn t) &rest format-args)
-  (format t "~&;~A: ~A~%"
+  (format t "~&;~A warning: ~A~%"
 	  (xmp-warning-leader conn)
 	  (apply 'format nil format-args)))
 
@@ -1142,8 +1276,12 @@
 	((find-package pk))
 	(t *package*)))
 
-(defun resolve-uri (uri)
-  (or (ignore-errors (net.uri:parse-uri uri)) uri))
+(defun xmp-resolve-uri (uri &optional stringp)
+  (or (ignore-errors (let ((x (net.uri:parse-uri uri)))
+		       (if stringp
+			   (net.uri:uri-path x)
+			 x)))
+      uri))
 
 (defmethod xmp-parse-message ((conn xmp-connector) source &key namespaces) 
   (let* ((dns (xmp-normal-nse (xmp-message-dns conn)))
@@ -1155,9 +1293,9 @@
 		   :content-only t
 		   :uri-to-package
 		   (mapcar #'(lambda (x)
-			       (cons (resolve-uri (third x))
-				     (resolve-package (first x))))
-			   (apply 'append (mapcar 'cdr nss)))
+			       (cons (xmp-resolve-uri (nsd-uri x))
+				     (resolve-package (nsd-package x))))
+			   (apply 'append (mapcar 'nse-defs nss)))
 		   )
       (setf (xmp-message-pns conn) ns)
       xml)))
@@ -1248,10 +1386,12 @@
    ((xmp-server-lock server))
    (setf (xmp-server-enabled server) t)
    (when enable-exports
-     (maphash #'(lambda (k v)
-		  (declare (ignore v))
-		  (xmp-enable-method server k :all))
-	      (xmp-server-exports server)))
+     (let ((tables (xmp-server-exports server)))
+       (dotimes (i 3)
+	 (maphash #'(lambda (k v)
+		      (declare (ignore v))
+		      (xmp-enable-method server k :all))
+		  (aref tables i)))))
    ;; return server object
    server))
 
@@ -1267,10 +1407,12 @@
    ((xmp-server-lock server))
    (setf (xmp-server-enabled server) nil)
    (when disable-exports
-     (maphash #'(lambda (k v)
-		  (declare (ignore v))
-		  (xmp-disable-method server k :all))
-	      (xmp-server-exports server)))
+     (let ((tables (xmp-server-exports server)))
+       (dotimes (i 3)
+	 (maphash #'(lambda (k v)
+		      (declare (ignore v))
+		      (xmp-disable-method server k :all))
+		  (aref tables i)))))
    ;; return server object
    server))
 
@@ -1301,6 +1443,9 @@
 		;; add the new item at the end so lookup is
 		;;  in the same order as exports
 		(nconc item (list (setf entry (list sig)))))))
+     
+     ;; table-entry -> (sig return-type lisp-name enabled help-string . properties)
+
      (setf (cdr entry) (list* (xmp-normal-element-spec conn return :dns)
 			      (or lisp-name (intern name))
 			      enable
@@ -1337,6 +1482,8 @@
 	   name))))))
 
 (defmethod xmp-accept-method ((conn xmp-server-connector) name sig (args t))
+  ;; return zero values if method is not accepted
+  ;; return two values - lisp-name and return-type - if accepted
   (mp:with-process-lock 
    ((xmp-server-lock conn))
    (let* ((table (xmp-server-exports conn))
@@ -1407,12 +1554,16 @@
    (s from)
    (xmp-server-implementation conn s)))
 
-(defmethod xmp-decode-file ((conn xmp-client-connector) file)
+(defmethod xmp-parse-file ((conn xmp-connector) file)
   (with-open-file
    (s file)
-   (xmp-decode-message conn (xmp-parse-message conn s))))
+   (xmp-parse-message conn s)))
 
+(defmethod xmp-decode-file ((conn xmp-connector) file)
+  (xmp-decode-message conn (xmp-parse-file conn file)))
 
+(defmethod xmp-decode-string ((conn xmp-connector) file)
+  (xmp-decode-message conn (xmp-parse-message conn file)))
 
 
 
@@ -1952,7 +2103,6 @@
 	(return (car tl))))))
 
 
-
 (defmethod define-xmp-type ((conn t) name type-spec &rest options
 			       &key (redef :warn) (nss :dns)
 			       &allow-other-keys
@@ -1965,10 +2115,11 @@
 			       )
   (when (and odef (not (equal odef tdef)))
     (case redef
-      (:warn (xmp-warning conn "redefining xmp type ~S" dname))
+      (:warn (xmp-warning conn "redefining ~A type ~S" (xmp-warning-leader conn) dname))
       ((nil) nil)
       (otherwise
-       (xmp-error conn :def (list "redefining xmp type ~S" dname)))))
+       (xmp-error conn :def
+		  (list "redefining ~A type ~S" (xmp-warning-leader conn) dname)))))
   (xmp-lookup *defined-xmp-elements* nil nil dname
 	      (apply 'xmp-normal-type-spec conn type-spec nss options)))
 
@@ -1988,10 +2139,13 @@
 
       (when (and odef (not (equal odef tdef)))
 	(case redef
-	  (:warn (xmp-warning conn "redefining xmp type ~S" dname))
+	  (:warn (xmp-warning
+		  conn "redefining ~A element ~S" (xmp-warning-leader conn) dname))
 	  ((nil) nil)
 	  (otherwise
-	   (xmp-error conn :def (list "redefining xmp type ~S" dname)))))
+	   (xmp-error conn :def
+		      (list "redefining ~A element ~S"
+			    (xmp-warning-leader conn) dname)))))
       (xmp-lookup table
 		  (or oname dname) 
 		  (if oname
