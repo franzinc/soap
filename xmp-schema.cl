@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-schema.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-schema.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
 
 ;; XML Schema support
 
@@ -133,7 +133,7 @@
   (nconc place (list item)))
 
 
-(defclass schema-file-connector (xmp-string-in-connector)
+(defclass schema-file-connector (xmp-string-in-out-connector)
   (
    (protocol   :initarg :xml-schema)
    (source     :reader   schema-source :initarg :source)
@@ -492,7 +492,7 @@
 (defmethod xmp-complex-content ((conn schema-file-connector) (elt t) data
 				&rest options &key attributes &allow-other-keys)
   (declare (ignore options))
-  (format t "~&;;xmp-complex-content ~S~%" elt)
+  (format t "~&;; Undefined element ~S~%" elt)
   (list (list* (if attributes
 		   (concatenate
 		    'vector

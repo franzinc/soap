@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-test.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
 
 ;; Internal-use test cases
 
@@ -205,10 +205,15 @@
 (defun wsdl41 (&optional verbose)
   (wsdl01 "c:/franz/_current/soap/googleapi/GoogleSearch.wsdl" verbose *google-dns*))
 
-(defun wsdl51 (&optional verbose eval (dest t))
+(defun wsdl51 (&optional verbose eval (dest t) &aux sv)
   (net.xmp.soap::make-client-interface (wsdl41 verbose) 0 dest :eval eval))
 (defun wsdl52 (&optional verbose (eval t) (dest t))
   (net.xmp.soap::make-server-interface (wsdl41 verbose) 0 dest :eval eval))
+(defun wsdl53 (&optional verbose (eval t) (dest t))
+  (net.xmp.soap::make-server-interface (wsdl41 verbose) 0 dest :eval eval)
+  (values
+   (setf sv (funcall 'make-server))
+   (net.xmp.soap::encode-wsdl-file "tmp.wsdl" :servers sv)))
 
 (defun wsdl61 (&optional verbose eval)
   (net.xmp.soap::make-client-interface

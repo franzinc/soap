@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.0 2004/01/14 18:31:55 layer Exp $
+# $Id: Makefile,v 2.1 2004/02/13 05:35:28 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -43,8 +43,17 @@ DIST: FORCE
 	cp -p soapex.cl DIST/examples/soap
 	cp -p soapval1.cl DIST/examples/soap
 
-## 6.2 patch version 002:
+## 6.2 patch version 003:
 patch-dist: FORCE
+	rm -fr DIST DIST.src
+	mkdir DIST \
+	      DIST/code
+	cp -p soap.fasl DIST/code/soap.003
+	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.003
+	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.003
+
+## 6.2 patch version 002:
+patch-dist.002: FORCE
 	rm -fr DIST DIST.src
 	mkdir DIST DIST.src \
 	      DIST.src/examples \

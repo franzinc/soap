@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-aserve.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-aserve.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
 
 ;; Using AllegroServe as the transport layer.
 
@@ -70,6 +70,7 @@
    host agent content-type http-protocol method url
 
    ;; Accessors
+   xmp-destination-url
 
    ;; Generic functions
    xmp-server-response 

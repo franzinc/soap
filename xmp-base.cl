@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-base.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -145,6 +145,7 @@
    xmp-encode-object
    xmp-object-class 
    xmp-encode-begin
+   xmp-encode-attribute 
    xmp-encode-content
    xmp-encode-end
    xmp-message-send
@@ -631,12 +632,26 @@
 		     (cdr nse)))))))
 
 
-(defun string-equal-ex (x y)
+(defun string-equal-ex (x y &optional ignored-last-char)
   (typecase x
     ((or string symbol)
      (typecase y
        ((or string symbol)
-	(string-equal x y))))))
+	(or (string-equal x y)
+	    (when ignored-last-char
+	      (let* ((s1 (string x))
+		     (l1 (length x))
+		     (s2 (string y))
+		     (l2 (length y)))
+		(cond ((eql l1 (1- l2))
+		       (and (eql ignored-last-char (elt s2 (1- l2)))
+			    (string-equal s1 s2 :end2 (1- l2))))
+		      ((eql l2 (1- l1))
+		       (and (eql ignored-last-char (elt s1 (1- l1)))
+			    (string-equal s1 s2 :end1 (1- l1))))
+
+		      ))))
+	)))))
 
 (defun same-uri (x y)
   (typecase x 
@@ -648,7 +663,7 @@
     (net.uri:uri (setf y (or (net.uri::uri-string y)
 			     (format nil "~A" y)))))
   ;;(format t "~&same-uri ~S ~S~%" x y)
-  (string-equal-ex x y))
+  (string-equal-ex x y #\/))
 
 (defmethod xmp-package-of-uri ((conn xmp-connector) uri &aux e)
   (when (setf e (assoc uri (xmp-message-pns conn) :test 'same-uri))
@@ -1022,6 +1037,15 @@
 		((or string symbol) (second nsd)))
 	      (third nsd)))))
 	
+(defmethod xmp-encode-attribute ((conn xmp-string-out-connector)
+				 prefix suffix name value qname)
+  (xmp-encode-content conn " " :sanitize nil)
+  (when prefix (xmp-encode-content conn prefix :sanitize nil))
+  (when suffix (xmp-encode-content conn suffix :sanitize t))
+  (when name (xmp-encode-qualified-name conn name :out :sanitize t))
+  (xmp-encode-content conn "=" :sanitize nil)
+  (xmp-encode-string conn value :sanitize t :qname qname))
+
 
 (defmethod xmp-encode-begin ((conn xmp-string-out-connector) data &rest options 
 			      &key namespaces attributes empty &allow-other-keys)
@@ -1030,20 +1054,13 @@
   (xmp-encode-content conn "<" :sanitize nil)
   (xmp-encode-qualified-name conn data :out)
   (when (first namespaces)
-    (xmp-encode-content conn " xmlns=" :sanitize nil)
-    (xmp-encode-string conn (first namespaces) :sanitize t))
+    (xmp-encode-attribute conn "xmlns" nil nil (first namespaces) nil))
   (dolist (nse (cdr namespaces))
     (when (second nse)
-      (xmp-encode-content conn " xmlns:" :sanitize nil)
-      (xmp-encode-content conn (second nse) :sanitize t)
-      (xmp-encode-content conn "=" :sanitize nil)
-      (xmp-encode-string conn (third nse) :sanitize t)))
+      (xmp-encode-attribute conn "xmlns:" (second nse) nil (third nse) nil)))
   (do ((tl attributes (cddr tl)))
       ((atom tl))
-    (xmp-encode-content conn " " :sanitize nil)
-    (xmp-encode-qualified-name conn (first tl) :out :sanitize t)
-    (xmp-encode-content conn "=" :sanitize nil)
-    (xmp-encode-string conn (second tl) :sanitize t :qname t))
+    (xmp-encode-attribute conn nil nil (first tl) (second tl) t))
   (cond (empty
 	 (xmp-encode-content conn " />" :sanitize nil)
 	 (pop (xmp-out-nss conn)))

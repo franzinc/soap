@@ -1,3 +1,8 @@
+*******************************************************************************
+join from acl62 to trunk on 2/12/04
+next join tag: use join2.sh
+*******************************************************************************
+
 2004-01-16  Kevin Layer  <layer@gemini>
 
 	* xmp-soap.cl: get version from ChangeLog
@@ -5,6 +10,27 @@
 2003-12-15  Kevin Layer  <layer@crikey>
 
 	* xmp-soap.cl: workaround for bug13913
+
+2004-01-23  Kevin Layer  <layer@gemini>
+
+	* Makefile: patch-dist rule for v3 patch
+	* build.cl: patch version
+	* soap.cl: patch version
+	* xmp-wsdl.cl: remove compile warning
+
+2004-01-23    <mm@KETCHTOO>
+
+	* xmp-wsdl.cl (wsdl-bind-operation): equate namespace and targetNamespace
+	                 use name attribute from operation as method wrapper
+	            (make-client-interface): add port argument
+		    (make-server-interface): add port argument
+		    (wsdl-make-interface): add port argument
+	                 link service/binding/portType correctly
+			 (encode-wsdl-file): NEW wsdl file writer (partial)
+
+	* xmp-base.cl (same-uri): ignore mismatch if only trailing /
+	* xmp-schema.cl (schema-file-connector): ch super to xmp-string-in-out-connector
+	* xmp-soap.cl (xmp-encode): split float specializer into two methods
 
 2003-12-01  Kevin Layer  <layer@crikey>
 
@@ -106,4 +132,4 @@
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.1 $
+$Revision: 2.2 $

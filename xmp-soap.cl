@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-soap.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
 
 ;; SOAP support
 
@@ -353,6 +353,10 @@
 		    :initarg :empty-element :initform :default-value)
    (string-type     :initform 'enc:|string|) 
    (undef-list      :accessor soap-undef-list :initform nil)
+
+   (port-name       :accessor soap-port-name    :initarg :port-name :initform nil)
+   (binding-name    :accessor soap-binding-name :initarg :binding-name :initform nil)
+   (service-name    :accessor soap-service-name :initarg :service-name :initform nil)
 
    ))
 

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-wsdl.cl,v 2.2 2004/02/13 05:35:28 layer Exp $
 
 ;; WSDL support
 
@@ -193,6 +193,10 @@
 
    (undef-ns   :accessor wsdl-undef-ns   :initform nil)
    (server-exports :accessor wsdl-server-exports :initform nil)
+
+   (file-stream :accessor wsdl-file-stream :initform nil)
+   (xml-leader    :initform "xml version=\"1.0\"")
+   (wsdl-targets  :accessor wsdl-targets  :initform nil)
  
    ))
 
@@ -242,6 +246,13 @@
 	    wsdl:|service|)
      (:seq* (:any)))))
      
+(defmethod schema-collect-target :around ((conn wsdl-file-connector)
+					  attributes)
+  (declare (ignore attributes))
+  (let ((found (call-next-method)))
+    (when found
+      (pushnew found (wsdl-targets conn) :test #'same-uri)
+      found)))
 
 (defmethod xmp-decode-element :around ((conn wsdl-file-connector)
 				      (elt (eql 'wsdl:|definitions|)) (data t)
@@ -271,8 +282,26 @@
 (schema-named-part wsdl-file-connector wsdl:|port|       :port)
 
 
-(defmethod wsdl-service-names ((conn wsdl-file-connector))
-  (mapcar 'first (cdr (wsdl-services conn))))
+(defmethod wsdl-service-names ((conn wsdl-file-connector) &optional and-ports)
+  (if and-ports
+      (let (services ports)
+	(dolist (sdef (cdr (wsdl-services conn)))
+	  (dolist (spart (third sdef))
+	    (case (first spart)
+	      (:port (push 
+		      (case and-ports
+			(:verbose
+			 (list (second spart)
+			       (getf (getf (cddr spart) :attributes)
+				     'wsdl:|binding|)
+			       (getf (cdr (assoc :soap-address
+						 (getf (cddr spart) :content)))		
+				'wsdl:|location|)))
+			(otherwise (second spart)))
+		      ports))))
+	  (push (cons (first sdef) (reverse ports)) services))
+	(reverse services))
+      (mapcar 'first (cdr (wsdl-services conn)))))
 
 
 (defmethod wsdl-define-type ((conn wsdl-file-connector) typedef do-form)
@@ -390,7 +419,7 @@
 	  )
 
       (flet ((do-element
-	      (msg-name action binding
+	      (method-name msg-name action binding
 			&aux
 			(parts (third (assoc msg-name messages)))
 			(content (getf (cdr binding) :content))
@@ -405,10 +434,27 @@
 		  (error "SOAP use=~S is not implemented." use) ;;;???
 		  )
 	      (when ns
-		(or pk (pushnew ns (wsdl-undef-ns conn) :test #'string=)))
+		(or pk
+		    (let* ((tg (wsdl-targets conn)) pk2)
+
+		      ;; Look in the list of all targetNamespace attributes
+		      ;; in the definition.
+
+		      (cond
+		       ;; if the soap:body namespace attribute is in the list
+		       ;;    assume the user will deal with it
+		       ((member ns tg :test #'same-uri) nil)
+
+		       ;; otherwise, if there is only one targetNamespace
+		       ;;    and it has a package, make these two the same
+		       ((and (eql 1 (length tg))
+			     (setf pk2 (net.xmp::xmp-uri-to-package
+					conn (first tg) :dns)))
+			(setf pk pk2))))			   
+		    (pushnew ns (wsdl-undef-ns conn) :test #'string=)))
 	      `(define-soap-element
 		 nil
-		 ',msg-name 
+		 ',method-name 
 		 '(:complex
 		   (:seq1    
 		    ,@(mapcar #'(lambda (part)
@@ -416,21 +462,21 @@
 					     ,(getf (cddr part) :type)))
 			      parts))
 		   ,@(when ns `(:namespaces
-				(nil (,(when pk (package-name pk))
+				(nil (,(when pk (intern (package-name pk) :keyword))
 				      "tns"
 				      ,ns))))
 		   ,@(when estyle `(:encoding ,estyle))
 		   ,@(when action `(:action ,action))
 		   )))
 	     )
-	(do-form (do-element in-msg-name action bind-in))
-	(do-form (do-element out-msg-name nil bind-out))
+	(do-form (do-element op-name in-msg-name action bind-in))
+	(do-form (do-element out-msg-name out-msg-name nil bind-out))
 	(do-form
 	 (let* ((def-name (read-from-string (format nil "~A~A"
 						    prefix
 						    (case suffix
 						      (:index (incf cx))
-						      (:message in-msg-name)))))
+						      (:message op-name)))))
 		(one-part (and in-parts
 			       (null (cdr in-parts))
 			       (first in-parts)))
@@ -455,7 +501,7 @@
 		)
 	   (ecase mode
 	     (:client
-	      (setf comment (format nil "Send client message ~A " in-msg-name))
+	      (setf comment (format nil "Send client message ~A " op-name))
 	      `(defun ,def-name 
 		 (&rest ,(do-form "args") &key ,@key-args)
 		 (declare (ignore ,@key-args))
@@ -466,11 +512,11 @@
 		   (values
 		    ,(if one-def
 			 `(apply 'call-soap-method ,(do-form "conn")
-				 ',in-msg-name 
+				 ',op-name 
 				 ,(second one-part)
 				 ,(do-form "args") nil)
 		       `(apply 'call-soap-method
-			       ,(do-form "conn") ',in-msg-name ,(do-form "args")))
+			       ,(do-form "conn") ',op-name ,(do-form "args")))
 		    ,(do-form "conn")))))
 	     (:server
 	      (let* ((one-ret (and out-parts
@@ -507,11 +553,11 @@
 				   out-parts ret-keys)
 				  ))
 		     )
-		(push `(',in-msg-name ',in-elts
+		(push `(',op-name ',in-elts
 				      ,@(when action (list :action action))
 				      :lisp-name ',def-name :return ',out-msg-name)
 		      (wsdl-server-exports conn))
-		(setf comment (format nil "Handler for message ~A" in-msg-name))
+		(setf comment (format nil "Handler for message ~A" op-name))
 		(cond ((and one-def ret-def)
 		       `(defun ,def-name (&key ,@in-keys)
 			  ((lambda (&key ,@key-args)
@@ -544,61 +590,49 @@
 	 comment))
       )))
 
-(defmethod wsdl-service ((conn wsdl-file-connector) service &optional error-p)
-  (or (when (consp service) service)
-      (assoc service (cdr (wsdl-services conn)) :test #'string-equal)
+
+(defmethod wsdl-service-binding-names ((conn wsdl-file-connector) sdef port
+				       &optional error-p)
+  (let* (pref bname url (i 0)
+	      )
+    (dolist (spart (third sdef))
+      (case (first spart)
+	(:port (if (typecase port 
+		     (integer (eql port i))
+		     (otherwise (eq port (second spart))))
+		   (return (setf pref spart))
+		 (incf i)))))
+    (when pref
+      (setf bname (getf (getf (cddr pref) :attributes) 'wsdl:|binding|))
+      (setf url (getf (cdr (assoc :soap-address (getf (cddr pref) :content)))
+		      'wsdl:|location|)))
+
+    (if (and sdef pref bname url)
+	(values bname url)
       (if error-p
-	  (error "Cannot find service ~S" service)
-	nil)))
-  
-(defmethod wsdl-service-port-name ((conn wsdl-file-connector) service &optional error-p)
-  (let ((sdef (wsdl-service conn service error-p)))
-    (when sdef
-      (or (second (assoc :port (third sdef)))
-	  (if error-p
-	      (error "Cannot find port name in service ~S" sdef)
-	    nil)))))
+	  (error "Cannot find binding name in service ~S" sdef)
+	nil))))
 
-(defmethod wsdl-service-binding-name ((conn wsdl-file-connector) service
-				      &optional error-p)
-  (let* ((sdef (wsdl-service conn service error-p))
-	 (pref (assoc :port (third sdef)))
-	 )
-    (when sdef
-      (or (getf (getf (cddr pref) :attributes) 'wsdl:|binding|)
-	  (if error-p
-	      (error "Cannot find binding name in service ~S" sdef)
-	    nil)))))
-
-(defmethod wsdl-service-location ((conn wsdl-file-connector) service
-				  &optional error-p)
-  (let* ((sdef (wsdl-service conn service error-p))
-	 (pref (assoc :port (third sdef)))
-	 )
-    (when sdef
-      (or (getf (cdr (assoc :soap-address (getf (cddr pref) :content)))
-		'wsdl:|location|)
-	  (if error-p
-	      (error "Cannot find binding name in service ~S" sdef)
-	    nil)))))
 
 
 (defmethod make-client-interface ((conn wsdl-file-connector) service destination
 				  &rest args
 				  &key
+				  port
 				  (eval t)
 				  (lisp-package :keyword)
 				  (file-package :user)
 				  (expand-singleton t)
 				  null-element (empty-element nil)
 				  (prefix :client-) (suffix :index))
-  (declare (ignore eval lisp-package file-package null-element empty-element
+  (declare (ignore port eval lisp-package file-package null-element empty-element
 		   expand-singleton prefix suffix))
   (apply 'wsdl-make-interface conn service destination :client args))
 
 (defmethod make-server-interface ((conn wsdl-file-connector) service destination
 				  &rest args
 				  &key
+				  port
 				  (eval t)
 				  (lisp-package :keyword)
 				  (file-package :user)
@@ -608,7 +642,7 @@
 				  action
 				  message-dns
 				  )
-  (declare (ignore eval lisp-package file-package null-element empty-element
+  (declare (ignore port eval lisp-package file-package null-element empty-element
 		   expand-singleton prefix suffix action message-dns))
   (apply 'wsdl-make-interface conn service destination :server args))
 				  
@@ -616,6 +650,7 @@
 (defmethod wsdl-make-interface ((conn wsdl-file-connector) service destination
 				  mode
 				  &key
+				  port
 				  (eval t evp)
 				  (lisp-package :keyword)
 				  (file-package :user)
@@ -628,9 +663,30 @@
 				  (suffix :index)
 				  action
 				  message-dns
-				  &aux open defs)
+				  &aux w open defs
+				  sdef bname port-name pdef opdefs bdef
+				  types binding btype url
+				  )
   (or service (setf service 0))
-  (when (numberp service) (setf service (elt (wsdl-service-names conn) service)))
+  (or port (setf port 0))
+  (and (numberp service)
+       (setf w (nth service (wsdl-service-names conn)))
+       (setf service w))
+  (or (setf sdef (assoc service (cdr (wsdl-services conn)) :test #'string-equal))
+      (error "Cannot find service ~S" service))
+  (multiple-value-setq (bname url)
+    (wsdl-service-binding-names conn sdef port t))
+  (setf bdef (or (assoc bname (cdr (wsdl-bindings conn)))
+		 (error "Cannot find binding ~S" bname)))
+  (setf binding (getf (cdr bdef) :binding))
+  (setf btype   (getf (cdr bdef) :type))
+  (setf port-name btype)
+  (setf pdef (or (assoc port-name (cdr (wsdl-port-types conn)))
+		 (error "Cannot find portType ~S" port-name)))
+  (setf opdefs (getf (cdr pdef) :port-type))
+
+  (setf types (cdr (schema-types conn)))
+
   (etypecase destination
     (stream nil)
     ((member nil t) nil)
@@ -638,6 +694,7 @@
     )
   (when (and expand-singleton (null eval))
     (warn "expand-singleton=t is ignored when eval=nil"))
+
   (flet ((do-form
 	  (form &rest comments)
 	  (etypecase form
@@ -665,25 +722,12 @@
 		 (format destination "~&~%~S~%" form)))
 	     (when eval (eval form))
 	     form))))
-    (unwind-protect
-	(let* ((sdef (wsdl-service conn service t))
-	       (port-name (wsdl-service-port-name conn sdef t))
-	       (bname (wsdl-service-binding-name conn sdef t))
-	       (pdef (or (assoc port-name (cdr (wsdl-port-types conn)))
-			 (error "Cannot find portType ~S" port-name)))
-	       (opdefs (getf (cdr pdef) :port-type))
-	       (bdef (or (assoc bname (cdr (wsdl-bindings conn)))
-			 (error "Cannot find binding ~S" bname)))
-	       (types (cdr (schema-types conn)))
-	       (binding (getf (cdr bdef) :binding))
-	       (btype   (getf (cdr bdef) :type))
-	       soap-binding x
-	       )
 
-	  (or (eq port-name btype)
-	      (error "service.port=~S binding.type=~S" port-name btype))
+    (unwind-protect
+	(let (soap-binding x)
+
 	  (setf (wsdl-undef-ns conn) nil
-		(wsdl-soap-address conn) (wsdl-service-location conn sdef t)
+		(wsdl-soap-address conn) url
 		(wsdl-operations conn) opdefs
 		(wsdl-expand-singleton conn) expand-singleton
 		(wsdl-client-options conn)
@@ -748,5 +792,144 @@
 
 
 
+;;;
+;;; XMP output methods to generate WSDL file from Lisp server def.
+;;;
+
+(defvar *wsdl-file-depth* nil)
+
+(defun encode-wsdl-file (file &key namespaces servers
+			      (if-exists :supersede)
+			      )
+  (let ((conn (make-instance 'wsdl-file-connector 
+			     :message-dns (xmp-merge-nses
+					   namespaces *wsdl-default-namespaces*)
+			     ))
+	type-defs messages ports bindings services
+	(*wsdl-file-depth* 1)
+	counters
+	)
+    (flet ((make-name (prefix &aux
+			      (place (assoc prefix counters))
+			      )
+		      (or place (push (setf place (cons prefix 0)) counters))
+		      (incf (cdr place))
+		      (format nil "~A~3,'0D" prefix (cdr place))		      
+		      ))
+
+      (dolist (s (if (and servers (atom servers)) (list servers) servers))
+	(let* ((service-name (when (consp s) (first s)))
+	       (server (if (consp s) (second s) s))
+	       (port-name (or (soap-port-name server) (make-name :port)))
+	       (binding-name (or (soap-binding-name server) (make-name :binding)))
+	       )
+	  (or service-name
+	      (setf service-name (or (soap-service-name server)
+				     (make-name :service))))
+	  (push `((wsdl:|service| "name" ,service-name)
+		  ((wsdl:|port| "name" ,port-name "binding" ,binding-name)
+		   ((wsoap:|address| "location" 
+			   ,(or (xmp-destination-url server) "???")))
+		   ))
+		services)
+	  ))
+   
+      (with-open-file
+       (s file :direction :output :if-exists if-exists)
+
+       ;; save s in conn
+       (setf (wsdl-file-stream conn) s)
+
+       (xmp-message-begin conn)
+       (xmp-encode-content conn
+			   (format nil
+				   "<?~A?>" 
+				   (xmp-destination-leader conn))
+			   :sanitize nil)
+       (format s "~&")
+       (xmp-encode-begin
+	conn 'wsdl:|definitions| :namespaces (xmp-message-dns conn))
+
+       ;; (wsdl:|types| ((xsd:|schema| type-def) ... )
+       (xmp-encode conn type-defs nil)
+
+       (dolist (m messages)
+	 ;; (wsdl:|message| message-def)*
+	 (xmp-encode conn m nil))
+     
+       (dolist (p ports)
+	 ;; (wsdl:|portType| port-def)*
+	 (xmp-encode conn p nil))
+
+       (dolist (b bindings)
+	 ;; (wsdl:|binding| bdef)*
+	 (xmp-encode conn b nil))
+
+       (dolist (s services)
+	 ;; (wsdl:|service| sdef)*
+	 (xmp-encode conn s nil))
+
+       (format s "~&")
+       (xmp-encode-end conn 'wsdl:|definitions|)
+       (format s "~&"))
+
+      )))
+	     
+
+(defmethod xmp-encode ((conn wsdl-file-connector) (item t) (type t)
+		       &rest options &key &allow-other-keys
+		       &aux elt attrs parts (s (wsdl-file-stream conn))
+		       )
+  ;; item -> element-name
+  ;;      -> (element-name [item] ... )
+  ;;      -> ((element-name [attr-name value] ... ) [item] ... )
+  (cond ((null item))
+	((atom item) (setf elt item))
+	(t (setf elt (first item) parts (cdr item))
+	   (when (consp elt)
+	     (setf attrs (cdr elt))
+	     (setf elt (car elt)))))
+  (when elt
+    (cond (parts
+	   (when *wsdl-file-depth*
+	       (format s "~&~VA" (* 2 *wsdl-file-depth*) ""))
+	   (let ((*wsdl-file-depth* (when *wsdl-file-depth* (1+ *wsdl-file-depth*))))
+	     (xmp-encode-begin conn elt :attributes attrs)
+	     (dolist (part parts) (xmp-encode conn part nil)))
+	   (when *wsdl-file-depth*
+	     (format s "~&~VA" (* 2 *wsdl-file-depth*) ""))
+	   (xmp-encode-end conn elt))
+	  (t (xmp-encode-begin conn elt :attributes attrs :empty t)))))
 
 
+(defmethod xmp-content-string ((conn wsdl-file-connector) data 
+			       &key (sanitize t) string
+			       &allow-other-keys)
+  (if (and string (eq string (xmp-message-string conn)))
+      (let ((s (call-next-method conn data :sanitize sanitize))
+	    (stream (wsdl-file-stream conn))
+	    )
+	(format stream "~A" s)
+	s
+	)
+    (call-next-method)))
+
+(defmethod xmp-encode-begin :around ((conn wsdl-file-connector) (elt t) &rest options 
+			      &key namespaces attributes &allow-other-keys)
+  (let (values)
+    (let ((*wsdl-file-depth*
+	   (if (> (+ (if namespaces (length namespaces) 0)
+		     (if attributes (length attributes) 0))
+		  3)
+	       (+ 2 *wsdl-file-depth*)
+	     nil)))
+      (setf values (multiple-value-list (call-next-method))))
+    (when *wsdl-file-depth* 
+      (format (wsdl-file-stream conn) "~&~VA" (* 2 *wsdl-file-depth*) ""))
+    (values-list values)))
+
+(defmethod xmp-encode-attribute :before ((conn wsdl-file-connector)
+					 (prefix t) (suffix t) (name t)
+					 (value t) (qname t))
+  (when *wsdl-file-depth*
+    (format (wsdl-file-stream conn) "~&~VA" (1+ *wsdl-file-depth*) "")))
