@@ -1,3 +1,7 @@
+2003-12-15  Kevin Layer  <layer@crikey>
+
+	* xmp-soap.cl: workaround for bug13913
+
 2003-12-01  Kevin Layer  <layer@crikey>
 
 	* Makefile,

@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
+;; $Id: xmp-soap.cl,v 1.3 2003/12/15 16:29:18 layer Exp $
 
 ;; SOAP support
 
@@ -1693,7 +1693,11 @@
 		       &rest options &key &allow-other-keys)
   (apply 'xmp-encode dest data 'xsd:|int| options))
 
-(defmethod xmp-encode ((dest soap-connector) (data float) (type null)
+(defmethod xmp-encode ((dest soap-connector) (data single-float) (type null)
+		       &rest options &key &allow-other-keys)
+  (apply 'xmp-encode dest data 'xsd:|double| options))
+
+(defmethod xmp-encode ((dest soap-connector) (data double-float) (type null)
 		       &rest options &key &allow-other-keys)
   (apply 'xmp-encode dest data 'xsd:|double| options))
 
