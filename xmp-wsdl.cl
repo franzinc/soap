@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.3 2004/04/23 18:42:17 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.4 2004/04/23 22:07:05 mm Exp $
 
 ;; WSDL support
 
@@ -563,7 +563,7 @@
 	    ))
 
 	  ((null (setf simple (getf props :simple-type :none)))
-	   (setf new-def `(:simple xsd:string)))
+	   (setf new-def `(:simple xsd:|string|)))
 	  ((consp simple)
 	   (or
 	    (let* ((r (cdr (assoc :restriction simple)))

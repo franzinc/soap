@@ -4,6 +4,11 @@ next join tag: use join2.sh
 *******************************************************************************
 
 2004-04-23    <mm@KETCHTOO>
+
+	* xmp-wsdl.cl (wsdl-define-type): fix error in ANSI mode
+	
+	
+2004-04-23    <mm@KETCHTOO>
 	
 	* xmp-soap.cl (soap-encode-parts): remove compiler warning
 
@@ -160,4 +165,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.4 $
+$Revision: 2.5 $
