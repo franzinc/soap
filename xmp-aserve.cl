@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-aserve.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
+;; $Id: xmp-aserve.cl,v 2.0 2004/01/14 18:31:55 layer Exp $
 
 ;; Using AllegroServe as the transport layer.
 

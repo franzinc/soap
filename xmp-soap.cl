@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 1.3 2003/12/15 16:29:18 layer Exp $
+;; $Id: xmp-soap.cl,v 2.0 2004/01/14 18:31:55 layer Exp $
 
 ;; SOAP support
 
