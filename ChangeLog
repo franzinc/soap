@@ -1,3 +1,7 @@
+2004-01-16  Kevin Layer  <layer@gemini>
+
+	* xmp-soap.cl: get version from ChangeLog
+
 2003-12-15  Kevin Layer  <layer@crikey>
 
 	* xmp-soap.cl: workaround for bug13913
@@ -101,3 +105,5 @@
 
 	* (NEW) soap-client.htm
 
+*******************************************************************************
+$Revision: 2.1 $

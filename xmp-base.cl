@@ -1,6 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp -*-
 ;;
-;; copyright (c) 2003 Franz Inc, Berkeley, CA
+;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
+;; copyright (c) 2003-2004 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -16,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.0 2004/01/14 18:31:55 layer Exp $
+;; $Id: xmp-base.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 

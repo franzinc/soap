@@ -1,5 +1,5 @@
 
-;; $Id: googlekey.cl,v 2.0 2004/01/14 18:31:55 layer Exp $ 
+;; $Id: googlekey.cl,v 2.1 2004/01/16 19:37:23 layer Exp $ 
 
 (in-package :user)
 

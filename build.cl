@@ -1,5 +1,5 @@
 
-;; $Id: build.cl,v 2.0 2004/01/14 18:31:55 layer Exp $ 
+;; $Id: build.cl,v 2.1 2004/01/16 19:37:23 layer Exp $ 
 
 (in-package :user)
 
@@ -22,6 +22,7 @@
   (with-open-file (out soap-cl :direction :output :if-exists :supersede
 		   :if-does-not-exist :create)
     (print `(in-package :user) out)
+    #+ignore
     (print `(sys:defpatch ,(ecase *current-case-mode*
 			     (:case-sensitive-lower :soapm)
 			     (:case-insensitive-upper :soapa))

@@ -1,6 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp.soap -*-
 ;;
-;; copyright (c) 2003 Franz Inc, Berkeley, CA
+;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
+;; copyright (c) 2003-2004 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -16,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.0 2004/01/14 18:31:55 layer Exp $
+;; $Id: xmp-soap.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
 
 ;; SOAP support
 
@@ -28,7 +29,12 @@
 (eval-when (compile eval)
   (defmacro soap-case-mode () *current-case-mode*))
 
-(defparameter *soap-version* (list 1 3 1))
+(eval-when (compile eval load)
+(defparameter *soap-raw-version* #.(sys::version-from-file "ChangeLog"))
+)
+(defparameter *soap-version*
+    '#.(sys::version-string-to-list *soap-raw-version*))
+
 (defun soap-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
   (typecase v1
     (integer (if (or (< (first *soap-version*) v1)

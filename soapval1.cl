@@ -1,6 +1,7 @@
 ;; -*- mode: common-lisp; package: user -*-
 ;;
-;; copyright (c) 2003 Franz Inc, Berkeley, CA
+;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
+;; copyright (c) 2003-2004 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -16,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapval1.cl,v 2.0 2004/01/14 18:31:55 layer Exp $
+;; $Id: soapval1.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
 
 ;; SOAP server example
 ;; This example may be submitted to the SOAP validator at http://www.soapware.org/
