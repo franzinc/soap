@@ -16,14 +16,24 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soap.cl,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: soap.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
 
+(sys:defpatch "soap" 2 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+  "v0: The Allegro SOAP client;
+v1: SOAP server;
+v2: WSDL input."
+  :type :system
+  :post-loadable t)
+
 (in-package :user)
 
-(load (ecase *current-case-mode*
-	(:case-sensitive-lower "soapm.fasl")
-	(:case-insensitive-upper "soapa.fasl")))
+(let ((module (ecase *current-case-mode*
+	      (:case-sensitive-lower :soapm)
+	      (:case-insensitive-upper :soapa))))
+  (require module)
+  (provide module)
+  (provide :soap))
 
 (provide :soap)

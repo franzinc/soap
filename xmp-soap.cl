@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: xmp-soap.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
 
 ;; SOAP support
 
@@ -28,17 +28,60 @@
 (eval-when (compile eval)
   (defmacro soap-case-mode () *current-case-mode*))
 
+(defparameter *soap-version* (list 1 3 1))
+(defun soap-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
+  (typecase v1
+    (integer (if (or (< (first *soap-version*) v1)
+		     (and v2
+			  (or 
+			   (and (= (first *soap-version*) v1)
+				(< (second *soap-version*) v2))
+			   (and v3
+				(= (second *soap-version*) v2)
+				(< (third *soap-version*) v3)))))
+		 (if error-p
+		     (error
+		      "SOAP Module Version ~A.~A.~A needed, but ~{~A.~A.~A~} is loaded."
+		      v1 (or v2 0) (or v3 0) *soap-version*)
+		   nil)
+	       *soap-version*))
+    (otherwise (format v1-or-s "SOAP Module Version ~{~A.~A.~A~}" *soap-version*))))
+    
 (eval-when (compile load eval)
   (defparameter *soap-case-mode* (soap-case-mode))
   (or (eq *soap-case-mode* *current-case-mode*)
-      (error "Expected *current-case-mode*=~S" *soap-case-mode*)))
+      (error "Expected *current-case-mode*=~S" *soap-case-mode*))
+
+  #+ignore
+  (or (position :soapaction net.aserve::*header-keyword-array*
+		:test #'string-equal)
+      (cerror
+       "Continue, ignoring SOAPAction headers."
+       "This version of AllegroServe does not recognize HTTP SOAPAction headers."))
+
+  (or (multiple-value-bind (v0 v1 v2)
+	  (values-list net.aserve:*aserve-version*)
+	(or (< 1 v0)
+	    (and (eql 1 v0)
+		 (or (< 2 v1)
+		     (and (eql 2 v1)
+			  (< 29 v2))))))
+      (cerror
+       "Continue, ignoring SOAPAction headers."
+       "This version of AllegroServe does not recognize HTTP SOAPAction headers."))
+	
+
+  )
+
 
 
 (defpackage :net.xmp.soap
   (:export
 
+   soap-version
    soap-message-client
    soap-message-server
+   soap-export-method
 
    soap-element
    soap-header
@@ -47,9 +90,15 @@
    make-soap-header
    soap-must-understand
 
+   soap-sub-element-content
+   soap-alist-to-plist
+
    define-soap-type
    define-soap-element
    call-soap-method
+   *soap-server*
+   soap-invoke-method
+   soap-encode-object
 
    soap-connector
 
@@ -121,97 +170,101 @@
 
    ))
 
-(eval-when (compile) (pushnew :soap-dev *features*))
 
-(defpackage :net.xmp.soap.none
-  #+soap-dev(:nicknames :none)
-  (:use)
-  (:export 
-   "faultcode"
-   "faultstring"
-   "faultfactor"
-   "detail"
-   )
+(eval-when (compile load eval)
+  (defpackage :net.xmp.soap.none
+    (:use)
+    (:export 
+     "faultcode"
+     "faultstring"
+     "faultactor"
+     "detail"
+     )
+    )
+
+  (defpackage :net.xmp.soap.envelope
+    (:use)
+    (:export 
+     "Envelope"
+     "Header"
+     "Body"
+     "mustUnderstand"
+     "actor"
+     "Fault"
+     "faultcode"
+     "faultstring"
+     "faultactor"
+     "detail"
+     "VersionMismatch"
+     "MustUnderstand"
+     "Client"
+     "Server"
+     "encodingStyle"
+     ))
+
+  (defpackage :net.xmp.soap.encoding
+    (:use)
+    (:export
+     "arrayCoordinate"
+     "arrayType"
+     "offset"
+     "position"
+     "Array"
+     "Struct"
+     "duration"
+     "dateTime"
+     "NOTATION"
+     "time"
+     "date"
+     "gYearMonth"
+     "gYear"
+     "gMonthDay"
+     "gDay"
+     "gMonth"
+     "boolean";; simple-content enc:|boolean|
+     "base64"
+     "base64Binary";; simple-content enc:|base64Binary|
+     "hexBinary"
+     "float";; simple-content enc:|float|
+     "double";; simple-content enc:|double|
+     "anyURI"
+     "QName";; simple-content enc:|QName|
+     "string";; simple-content enc:|string|
+     "normalizedString"
+     "token"
+     "language"
+     "Name"
+     "NMTOKEN"
+     "NCName"
+     "NMTOKENS"
+     "ID"
+     "IDREF"
+     "ENTITY"
+     "IDREFS"
+     "ENTITIES"
+     "decimal"
+     "integer"
+     "nonPositiveInteger"
+     "negativeInteger"
+     "long"
+     "int";; simple-content enc:|int|
+     "short"
+     "byte"
+     "nonNegativeInteger"
+     "unsignedLong"
+     "unsignedInt"
+     "unsignedShort"
+     "unsignedByte"
+     "positiveInteger"
+     ))
+
   )
 
-(defpackage :net.xmp.soap.envelope
-  #+soap-dev(:nicknames :env)
-  (:use)
-  (:export 
-   "Envelope"
-   "Header"
-   "Body"
-   "mustUnderstand"
-   "actor"
-   "Fault"
-   "faultcode"
-   "faultstring"
-   "faultfactor"
-   "detail"
-   "VersionMismatch"
-   "MustUnderstand"
-   "Client"
-   "Server"
-   "encodingStyle"
-   ))
-
-(defpackage :net.xmp.soap.encoding
-  #+soap-dev(:nicknames :enc)
-  (:use)
-  (:export
-   "arrayCoordinate"
-   "arrayType"
-   "offset"
-   "position"
-   "Array"
-   "Struct"
-   "duration"
-   "dateTime"
-   "NOTATION"
-   "time"
-   "date"
-   "gYearMonth"
-   "gYear"
-   "gMonthDay"
-   "gDay"
-   "gMonth"
-   "boolean"                  ;; simple-content enc:|boolean|
-   "base64"
-   "base64Binary"             ;; simple-content enc:|base64Binary|
-   "hexBinary"
-   "float"                    ;; simple-content enc:|float|
-   "double"                   ;; simple-content enc:|double|
-   "anyURI"
-   "QName"                    ;; simple-content enc:|QName|
-   "string"                   ;; simple-content enc:|string|
-   "normalizedString"
-   "token"
-   "language"
-   "Name"
-   "NMTOKEN"
-   "NCName"
-   "NMTOKENS"
-   "ID"
-   "IDREF"
-   "ENTITY"
-   "IDREFS"
-   "ENTITIES"
-   "decimal"
-   "integer"
-   "nonPositiveInteger"
-   "negativeInteger"
-   "long"
-   "int"                       ;; simple-content enc:|int|
-   "short"
-   "byte"
-   "nonNegativeInteger"
-   "unsignedLong"
-   "unsignedInt"
-   "unsignedShort"
-   "unsignedByte"
-   "positiveInteger"
-   ))
-
+(eval-when (compile)
+  (defpackage :net.xmp.soap.none (:use) (:nicknames :none))
+  (defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
+  (defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
+  )
 
  
 (defclass soap-connector (xmp-connector) 
@@ -245,9 +298,12 @@
 		     (list :net.xmp.schema
 			   "xsd"
 			   "http://www.w3.org/2001/XMLSchema")
-		     (list :env
+		     (list :net.xmp.soap.envelope
 			   "soap"
 			   "http://schemas.xmlsoap.org/soap/envelope/")
+		     (list :net.xmp.soap.encoding
+			   "SOAP-ENC"
+			   "http://schemas.xmlsoap.org/soap/encoding/")
 		     )
 
 		    #+ignore
@@ -279,13 +335,37 @@
 		    ;; :warn   - warn if undefined element or type mismatch
 		    ;;   nil   - accept anything silently
 		    :initform :warn :initarg :decode-flag)
+   (null-element    :accessor soap-null-element
+		    ;; What to send when lisp content is nil:
+		    ;; :default-value  send  number->0  string->"" 
+		    ;; :empty          send empty element
+		    :initarg :null-element :initform :default-value)
+   (empty-element   :accessor soap-empty-element
+		    ;; How to decode an empty element:
+		    ;; :default-value  return  number->0  string->"" 
+		    ;; nil             return nil
+		    :initarg :empty-element :initform :default-value)
    (string-type     :initform 'enc:|string|) 
    (undef-list      :accessor soap-undef-list :initform nil)
 
    ))
 
+(defmethod xmp-copy ((object soap-connector)
+		     &key &allow-other-keys
+		     &aux (new (call-next-method)))
+  (setf (soap-encoding-style new) (soap-encoding-style object)
+	(soap-actor new) (soap-actor object)
+	(soap-headers new) (soap-headers object)
+	(soap-must-understand-flag new) (soap-must-understand-flag object)
+	(soap-decode-flag new) (soap-decode-flag object)
+	)
+  new)
+
 (defclass soap-client-connector  (soap-connector xmp-client-connector)  ())
-(defclass soap-server-connector  (soap-connector xmp-server-connector)  ())
+(defclass soap-server-connector  (soap-connector xmp-server-connector)
+  (
+   (action :accessor soap-server-action :initarg :action :initform nil)
+   ))
 
 (defclass soap-string-out-connector 
   (soap-connector xmp-string-out-connector) ())
@@ -552,7 +632,7 @@
 					  (:set
 					   (:element "faultcode"   enc:|QName|)
 					   (:element "faultstring" enc:|string|)
-					   (:element "faultfactor" enc:|string|)
+					   (:element "faultactor" enc:|string|)
 					   (:element "detail" (:complex (:seq* (:any))))
 					   )))
 
@@ -572,16 +652,7 @@
   (apply 'xmp-error conn 'soap-server-error keys))
 
 
-(defmethod xmp-copy ((conn soap-connector) (object soap-connector)
-		     &key &allow-other-keys
-		     &aux (new (call-next-method)))
-  (setf (soap-encoding-style new) (soap-encoding-style object)
-	(soap-actor new) (soap-actor object)
-	(soap-headers new) (soap-headers object)
-	(soap-must-understand-flag new) (soap-must-understand-flag object)
-	(soap-decode-flag new) (soap-decode-flag object)
-	)
-  new)
+
 
 
 
@@ -626,6 +697,11 @@
 
 (defclass soap-element (xmp-element) ())
 (defclass soap-header  (soap-element) ())
+(defclass soap-fault   (soap-element) 
+  ()  ;;;???
+  )
+
+   
 
 (defmethod xmp-object-class  ((conn soap-connector) (data t) (type (eql 'env:|Header|))
 			      &rest options 
@@ -637,7 +713,7 @@
 
   ;; code is modified copy of xmp-encode-object
 
-  (let ((tc (xmp-copy conn conn))
+  (let ((tc (xmp-copy conn))
 	(data (make-instance 'soap-header))
 	)
     (setf (xmp-message-string tc) nil)
@@ -673,7 +749,7 @@
 
 (defmethod soap-array-elements ((conn t) type-def)
   (if type-def
-      (list :seq* (or (second type-def) (list :any)))
+      `(:seq* (:element nil ,(second type-def)))
     '(:seq* (:any))))
 
 
@@ -684,28 +760,67 @@
   (apply 'define-xmp-element conn options))
 
 
+(defvar *soap-server* nil)
+(defmethod soap-encode-object ((conn null) name type data)
+  (if *soap-server*
+      (soap-encode-object *soap-server*  name type data)
+    (xmp-error nil :client "Cannot encode an object without a server context.")))
+
+(defmethod soap-encode-object ((conn soap-connector) name type data)
+
+  ;; code is modified copy of xmp-encode-object
+
+  (let ((tc (xmp-copy conn))
+	(new (make-instance 'soap-element :name name :type type :lisp-value data))
+	)
+    (setf (xmp-message-string tc) nil)
+    (xmp-message-begin tc)
+    (soap-encode-element tc (xmp-normal-element-spec conn name :out) data :type type)
+     (setf (xmp-element-content new) (xmp-message-string tc))
+    new))
 
 (defmethod soap-encode-element ((conn soap-connector)
 				element parts
-				&aux name type-class type-def cdef st v std)
+				&key type name
+				&aux dname type-def st std as)
   (etypecase element
     (cons (ecase (first element) (:element nil))
 	  (setf type-def (third element)
-		name (xmp-pick-name conn element)))
+		name (or name (xmp-pick-name conn element))))
     ((or string symbol)
-     (multiple-value-setq (type-def name)
-       (soap-find-element conn element :out))))
+     (multiple-value-setq (type-def dname)
+       (soap-find-element conn element :out))
+     (or name (setf name dname))
+     (when type (setf type-def type)))
+    )
   (or type-def (xmp-error conn :def :string (list "Cannot find ~A" element)))
   (or name (xmp-error conn :def :string
 		      (list "Cannot encode un-named element ~A" element)))
 
   (xmp-encode-begin conn name
-		    :empty (null parts)
 		    :namespaces (xmp-getf-in-part conn type-def :namespaces)
 		    :attributes 
-		    (append 
+		    (merge-plists 
+
+		     (when (setf st (xmp-getf-in-part conn type-def :encoding))
+		       ;; env:|encodingStyle| can appear in any element
+		       (list 'env:|encodingStyle| st))
 		     (when (setf st (xmp-getf-in-part conn type-def :send-type))
 		       (list 'xsi:|type| st))
+		     (when (setf st (xmp-getf-in-part conn type-def :send-atype))
+		       (list 'enc:|arrayType| 
+			     (if (setf as (xmp-getf-in-part conn type-def :send-asize))
+				 (concatenate
+				  'string
+				  (xmp-encoded-qualified-name conn st :out)
+				  "["
+				  (format nil "~A"
+					  (typecase as
+					    (number (truncate as))
+					    ;; (cons "(dim ...) ???")
+					    (otherwise (length parts))))
+				  "]")
+			       st)))
 		     (when (and (setf st (xmp-getf-in-part
 					  conn type-def :must-understand
 					  (setf std (list nil))))
@@ -713,117 +828,229 @@
 		       (list 'env:|mustUnderstand| (if st "1" "0")))
 		     (xmp-getf-in-part conn type-def :attributes)))
 
-  (when parts
-    (or (consp type-def)
-	(and (setf v (soap-resolve-type conn type-def :out))
-	     (setf type-def v))
-	(setf type-def (list :simple type-def)))
-    (setf type-class (first type-def))
-    (ecase type-class
-      ((:simple :array)
-       (if (listp parts)
-	   (dolist (part parts)
-	     (xmp-encode conn part (second type-def)))
-	 (xmp-encode conn parts (second type-def))))
-      (:complex
-       ;; preserve the order of elements in the definition
-       ;;  but allow arguments in any order
-       ;; undefined elements in input will be ignored
-       ;; elements must be unique
-       (setf cdef (second type-def))
-       (labels ((encode (key defs opts &aux name arg (def '#:none))
-			(ecase key
-			  ((nil) (etypecase defs
-				   (cons
-				    (case (first defs)
-				      (:any (encode :element nil opts))
-				      (:element (encode :element defs opts))
-				      (otherwise
-				       (encode (first defs) (cdr defs) opts))))
-				   ((member nil) nil)
-				   (symbol (encode :element defs opts))))
-			  (:or (dolist (def defs)
-				 (when (setf name (encode nil def opts))
-				   (return name))))
-			  ((:seq :set)
-			   (when defs
-			     (setf name (encode nil (first defs) opts))
-			     (if (cdr defs)
-				 (encode key (cdr defs) opts)
-			       name)))
-			  ((:seq1 :set1)
-			   (when defs
-			     (multiple-value-setq (name arg)
-			       (encode nil (first defs) opts))
-			     (or arg (soap-encode-element conn name nil))
-			     (if (cdr defs)
-				 (encode key (cdr defs) opts)
-			       name)))
-			  ((:seq+ :set+)
-			   (when defs
-			     (multiple-value-setq (name arg)
-			       (encode nil (first defs) opts))
-			     (or arg (soap-encode-element conn name nil))
-			     (loop
-			      (multiple-value-setq (name arg)
-				(encode nil (first defs) opts))
-			      (or arg (return)))
-			     (if (cdr defs)
-				 (encode key (cdr defs) opts)
-			       name)))
-			  ((:seq* :set*)
-			   (when defs
-			     (loop
-			      (multiple-value-setq (name arg)
-				(encode nil (first defs) opts))
-			      (or arg (return)))
-			     (if (cdr defs)
-				 (encode key (cdr defs) opts)
-			       name)))
-			  (:element
-			   (etypecase defs
-			     ((member nil)
-			      (when parts 
-				(soap-encode-element
-				 conn (setf arg (first parts)) (second parts))
-				(setf parts (cddr parts)))
-			      (values (or arg :any) arg))
-			     (symbol
-			      (when (setf arg (getf parts defs))
-				(soap-encode-element conn defs arg)
-				(drop defs))
-			      (values defs arg))
-			     (cons 
-			      (when (setf name (xmp-elt-getf-name conn parts defs))
-				(setf arg (getf parts name def))
-				(soap-encode-element conn defs arg)
-				(drop name))
-			      (values defs name))))
-			  ))
-		(drop (name)
-		      (if (eq name (first parts))
-			  (setf parts (cddr parts))
-			(do ((tl parts (cddr tl)))
-			    ((atom (cddr tl)))
-			  (when (eq name (third tl))
-			    (setf (cddr tl) (cddddr tl))
-			    (return)))))			
-		)
-	 (encode (first cdef) (cdr cdef) (cddr type-def)))
-
-
-
-       ))
-    (xmp-encode-end conn name))
+  (soap-encode-parts conn parts name type-def)
+  (xmp-encode-end conn name)
   (values name type-def))
 
 
-			  
+(defun merge-plists (plist1 plist2 &rest more)
+  (if more
+      (merge-plists plist1 (apply 'merge-plists plist2 more))
+    (do ((ptl plist1 (cddr ptl)) copied (none '#:none))
+	((atom ptl) plist2)
+      (if (eq none (getf plist2 (car ptl) none))
+	  (setf plist2 (list* (first ptl) (second ptl)
+			      (if copied
+				  plist2
+				(append plist2 nil))))
+	(setf (getf plist2 (car ptl)) (second ptl))))))
+
+(defmethod soap-encode-parts ((conn soap-connector)
+			      parts name type-def
+			      &aux
+			      type-class cdef v type-res res
+			      aparts elt pattern attr send pname ptype pattr parg)
+  ;; return type of encoded part
+  (cond ((consp type-def)
+	 (setf type-class (first type-def)
+	       type-res (or (second type-def) name)))
+	((setf v (soap-resolve-type conn type-def :out))
+	 (setf type-class (first v)
+	       type-res (or (second v) type-def))
+	 (setf type-def v))
+	(t (setf type-class :simple type-res type-def)
+	   (setf type-def nil)))
+  (ecase type-class
+    (:simple
+     (if (consp parts)
+	 (dolist (part parts res)
+	   (setf res (xmp-encode conn part type-res)))
+       (xmp-encode conn parts type-res)))
+    (:array
+     (setf aparts (xmp-getf-in-part conn type-def :array-item))
+     (setf elt (or (getf aparts :element) (if (symbolp type-res) type-res "item")))
+     (setf pattern (getf aparts :argument))
+     (setf attr (getf aparts :attributes))
+     (setf send (getf aparts :send-type))
+     (dolist (part parts res)
+       (setf pname elt ptype nil pattr nil)
+       (or
+	(typecase part
+	  (xmp-element (setf res (xmp-encode conn part nil)) t)
+	  (cons
+	   (case pattern
+	     ((nil :arg-only) (setf parg part))
+	     (otherwise 
+	      (setf parg (second part))
+	      (ecase pattern
+		(:type-and-arg
+		 (setf ptype (first part)))
+		(:attributes-and-arg
+		 (setf pattr (first part)))
+		(:element-and-arg 
+		 (when (first part) (setf pname (first part))))
+		)))
+	   nil)
+	  (otherwise (setf parg part) nil)
+	  )
+	(cond
+	 ((and (or (null pname) (symbolp pname) (stringp pname))
+	       (null pattr) (null send))
+	  (setf res (soap-encode-element conn pname parg
+					 :type (or ptype type-res))))
+	 ((and (consp pname) (third pname) (null ptype) (null pattr) (null send))
+	  (setf res (soap-encode-element conn pname parg)))
+	 (t
+	  (etypecase pname
+	    (cons (setf pname (append pname nil)))
+	    ((member nil) (setf pname (list :element nil nil)))
+	    ((or string symbol) (setf pname (list :element pname nil))))
+	  (or (second pname)
+	      (setf (second pname) (if (symbolp type-res) type-res "item")))
+	  (or (third pname)
+	      (setf (third pname) (or ptype type-res)))
+	  (when (or attr pattr send)
+	    (let* ((pt (third pname))
+		   (ptl (if (consp pt)
+			    pt
+			  (setf (third pname)
+				(list :simple (third pname)))))
+		   (pa (getf (cddr ptl) :attributes)))
+	      (when (or attr pattr)
+		(setf (getf (cddr ptl) :attributes)
+		      (merge-plists pattr attr pa)))
+	      (when send
+		(setf (getf (cddr ptl) :send-type) (or ptype type-res)))))
+	  (setf res (soap-encode-element conn pname parg))
+	  )))))
+    (:complex
+     ;; preserve the order of elements in the definition
+     ;;  but allow arguments in any order
+     ;; undefined elements in input will be ignored
+     ;; elements must be unique
+     (setf cdef type-res)
+     (labels ((propagate (name arg key defs opts)
+			 (multiple-value-bind (n2 a2)
+			     (encode key defs opts)
+			   (cond ((and n2 a2) (values n2 a2))
+				 ((and name arg) (values name arg))
+				 (n2 (values n2 nil))
+				 (t (values name arg)))))	      
+	      (encode (key defs opts &aux name arg (def '#:none) prop)
+		      (ecase key
+			;; return two values:
+			;;    the name of an element or an element-def
+			;;    t if the element was actually encoded
+			((nil) (etypecase defs
+				 (cons
+				  (case (first defs)
+				    (:any (encode :any nil opts))
+				    (:element (encode :element defs opts))
+				    (otherwise
+				     (encode (first defs) (cdr defs) opts))))
+				 ((member nil) nil)
+				 (string (encode :element defs opts))
+				 (symbol (encode :element defs opts))))
+			(:or (dolist (def defs)
+			       (multiple-value-setq (name arg)
+				 (encode nil def opts))
+			       (when arg (return (values name t)))))
+			((:seq :set)
+			 (when defs
+			   (multiple-value-setq (name arg)
+			     (encode nil (first defs) opts))
+			   (if (cdr defs)
+			       (propagate name arg key (cdr defs) opts)
+			     (values name arg))))
+			((:seq1 :set1)
+			 (when defs
+			   (multiple-value-setq (name arg)
+			     (encode nil (first defs) opts))
+			   (or arg (soap-encode-element conn (first defs) nil))
+			   (if (cdr defs)
+			       (propagate name arg key (cdr defs) opts)
+			     (values name t))))
+			((:seq+ :set+)
+			 (when defs
+			   (multiple-value-setq (name arg)
+			     (encode nil (first defs) opts))
+			   (or arg (soap-encode-element conn (first defs) nil))
+			   (loop
+			    (multiple-value-setq (name arg)
+			      (encode nil (first defs) opts))
+			    (or arg (return)))
+			   (if (cdr defs)
+			       (propagate name arg key (cdr defs) opts)
+			     (values name t))))
+			((:seq* :set*)
+			 (when defs
+			   (loop
+			    (multiple-value-bind (n2 a2)
+			      (encode nil (first defs) opts)
+			      (when (null a2)
+				(return))
+			      (setf name n2 arg a2)))
+			   (if (cdr defs)
+			       (propagate name arg key (cdr defs) opts)
+			    (values name arg))))
+			(:any
+			 (when parts 
+			   (setf arg t)
+			   (multiple-value-bind (type-def name)
+			       (soap-find-element conn (first parts) :out)
+			     (if type-def
+				 (soap-encode-element
+				  conn name (second parts) :name name)
+			       (soap-encode-element
+				conn name (second parts) :name name
+				:type 'enc:|string|)))
+			   (setf parts (cddr parts)))
+			 (values (or name :any) arg))
+			(:element
+			 (cond ((and (consp defs) (null (second defs)))
+				(when parts 
+				  (setf arg t)
+				  (setf name
+					(soap-encode-element
+					 conn (first parts) (second parts)
+					 :name (first parts)
+					 :type (when (consp defs) (third defs))
+					 ))
+				  (setf parts (cddr parts)))
+				(values name arg))
+			       (t (typecase defs
+				    (cons (setf name (xmp-pick-name conn defs)))
+				    (otherwise (setf name defs)))
+				  (setf arg def)
+				  (when (setf prop (xmp-elt-getf-name conn parts defs))
+				    (setf name prop)
+				    (setf arg (getf parts prop def))
+				    (when (not (eq arg def))
+				      (soap-encode-element conn defs arg :name prop)
+				      (drop prop)))
+				  (values name (when name (not (eq arg def)))))))
+			))
+	      (drop (name)
+		    (if (eq name (first parts))
+			(setf parts (cddr parts))
+		      (do ((tl parts (cddr tl)))
+			  ((atom (cddr tl)))
+			(when (eq name (third tl))
+			  (setf (cddr tl) (cddddr tl))
+			  (return)))))			
+	      )
+       (encode (first cdef) (cdr cdef) (cddr type-def)))
+
+
+
+     )))
+
+
+	  
 
 
 
 (defmethod soap-encode-message ((conn soap-connector) method args &aux def)
-  (setf method (xmp-normal-element-spec conn method :out))
   (xmp-message-begin conn)
   (xmp-encode-content conn
 		      (format nil
@@ -845,11 +1072,19 @@
   (dolist (h (soap-headers conn))
     (xmp-encode conn h nil))
   (xmp-encode-begin conn 'env:|Body|)
-  (multiple-value-setq (method def)
-    (soap-encode-element conn method args))
+  (etypecase method
+    (xmp-element
+     (xmp-encode conn method nil)
+     (setf def (xmp-element-type method)
+	   method (xmp-element-name method)
+	   ))
+    ((or string symbol cons)
+     (multiple-value-setq (method def)
+       (soap-encode-element
+	conn (xmp-normal-element-spec conn method :out) args))))
   (xmp-encode-end conn 'env:|Body|)
   (xmp-encode-end conn 'env:|Envelope|)
-  (values method def))
+  (values method def (xmp-message-string conn)))
 
 (defmethod call-soap-method ((conn soap-client-connector)
 			    method &rest args)
@@ -872,10 +1107,12 @@
     (declare (ignore name))
     (xmp-decode-message 
      conn
-     (let* ((reply (xmp-message-send
+     (let* ((action (xmp-getf-in-part conn def :action))
+	    (reply (xmp-message-send
 		    conn
 		    :headers 
-		    `(("SOAPAction" . ,(xmp-getf-in-part conn def :action)))
+		    (when action
+		      `((:|SOAPAction| . ,action)))
 		    )))
        (xmp-parse-message conn reply
 			  :namespaces (xmp-getf-in-part conn def :namespaces)
@@ -903,13 +1140,23 @@
       (list (or (ignore-errors (parse-integer x :start start :end end))
 		0)))))
 
-(defmethod soap-parse-array-type (conn x nss)
-  (let* ((b0 (position #\[ x))
+(defmethod soap-parse-array-type (conn s nss)
+
+  ;; values:  element-type-name rank dimensions
+
+  (let* (x
+	 (pk (typecase s
+	       (symbol (setf x (symbol-name s))
+		       (symbol-package s))
+	       (otherwise (setf x s) nil)))
+	 (b0 (position #\[ x))
 	 (b1 (when b0 (position #\] x :start b0)))
 	 (b2 (when b1 (position #\[ x :start b1)))
 	 (b3 (when b2 (position #\] x :start b2)))
 	 (name (when (and b0 (< 0 b0))
-		 (xmp-decode-qualified-name conn (subseq x 0 b0) nss)))
+		 (if pk
+		     (intern (subseq x 0 b0) pk)
+		   (xmp-decode-qualified-name conn (subseq x 0 b0) nss))))
 	 )
     (cond ((and b0 b1 (null b2))
 	   (values name nil (soap-array-size x (1+ b0) b1)))
@@ -953,8 +1200,8 @@
 	(:warn (apply 'xmp-warning conn fmt args)))))
 
 (defmethod soap-exel-and-type ((conn soap-connector) elt attributes
-			       &aux dt exel type atype res nx tx tn dn)
-  (multiple-value-setq (exel dt dn) (xmp-defined-element-exel conn elt :in))
+			       &aux dt exel type atype res nx tx tn dn ad)
+  (multiple-value-setq (exel dt dn ad) (xmp-defined-element-defs conn elt :in 0))
   (setf tn dt)
   (multiple-value-setq (type atype res) (soap-decode-type conn attributes :in))
   (cond (atype (setf tn (list :array atype) nx (soap-array-elements conn res)))
@@ -965,7 +1212,19 @@
 			   (:array (soap-array-elements conn res))
 			   (:complex (second res))))))
 	(t (setf nx exel tx elt)))
-  (values exel nx (or dt tx) tn dn))
+  (values exel nx (or dt tx) tn dn ad))
+
+(defmethod soap-match-types ((conn soap-connector) t1 t2)
+  (or (null t1)
+      (null t2)
+      (equal t1 t2)
+      (equal t1 '(:seq* (:any)))
+      (equal t2 '(:seq* (:any)))
+      (eq t1 'xsd:|ur-type|)
+      (eq t2 'xsd:|ur-type|)
+      (eq t1 'xsd:|anyType|)
+      (eq t2 'xsd:|anyType|)
+      ))
 
 (defmethod xmp-begin-element ((conn soap-string-in-connector) (elt t)
 			      &rest options &key attributes &allow-other-keys
@@ -977,19 +1236,26 @@
 	   (soap-decode-note conn dn "Undefined element ~S" elt)))
   (cond (nx
 	 (soap-decode-note
-	  conn (or (equal exel nx) (null exel))
+	  conn (soap-match-types conn exel nx)
 	  "Type mismatch in element ~S: def=~S attr=~S."
 	  elt exel nx))
 	((eq dt elt)
-	 (soap-decode-note conn 
-			   
-			   ;; If element was undefined, dont emit a 
-			   ;;    redundant warning.
-			   (null dn)
-
-			   "Unspecified type in ~S." elt))
-	(t
-	 (soap-decode-note conn nil "Unknown type ~S in ~S." (or dt tn) elt)))
+	 (cond ((null dn)
+		;; If element was undefined, dont emit a 
+		;;    redundant warning.
+		)
+	       (tn (soap-decode-note conn nil
+				     "Unknown type (a) ~S in ~S."
+				     tn elt))
+	       (t  (soap-decode-note conn nil
+				     "Unspecified type in ~S." elt))))
+	((and dt tn)
+	 (if (eq dt tn)
+	     (soap-decode-note conn nil "Unknown type (b) ~S in ~S." tn elt)
+	   (soap-decode-note conn nil "Unknown type (c) ~S/~S in ~S." tn dt elt)))
+	(tn
+	 (soap-decode-note conn nil "Unknown type (d) ~S in ~S." tn elt))
+	(t (soap-decode-note conn nil "Unknown type (e) ~S in ~S." dt elt)))
   (or nx (call-next-method)))
 
 (defmethod xmp-begin-element :after ((conn soap-string-in-connector) elt
@@ -1022,6 +1288,23 @@
   (declare (ignore options))
   data)
 
+(defmethod xmp-simple-content :around ((conn soap-connector) 
+				       (elt t) (data null)
+				       &rest options &key &allow-other-keys)
+  (declare (ignore options))
+  (case (soap-empty-element conn)
+    (:default-value (call-next-method))
+    (otherwise nil)))
+
+(defmethod xmp-encode :around ((conn soap-connector) (data t) (elt null)
+			       &rest options 
+			       &key &allow-other-keys)
+  (declare (ignore options))
+  (case (soap-null-element conn)
+    (:empty nil)
+    (otherwise (call-next-method))))
+
+
 (defmacro def-soap-simple-content (elt &key class keywords
 				       (decode-class class) (decode-keys keywords)
 				       decode
@@ -1045,10 +1328,13 @@
 					  &key ,@decode-keys &allow-other-keys)
 	     ,@decode)))
      ,@(when encode
-	 `((defmethod xmp-encode ((conn ,encode-class) (elt (eql ',elt)) data
+	 `((defmethod xmp-encode ((conn ,encode-class) data (elt (eql ',elt))
 				  &rest options 
 				  &key ,@encode-keys &allow-other-keys)
 	     ,@encode)))))
+
+(define-soap-type nil 'xsd:|ur-type| '(:complex (:seq* (:any))))
+(define-soap-type nil 'xsd:|anyType| '(:complex (:seq* (:any))))
 
 (def-soap-simple-content enc:|QName|
   :class soap-connector
@@ -1061,25 +1347,31 @@
   :decode ((declare (ignore options))
 	   data)
   :encode ((declare (ignore options))
-	   (xmp-encode-content conn (format nil "~A" data))
+	   (xmp-encode-content conn
+			       (typecase data
+				 (string data)
+				 (null   "")
+				 (otherwise (format nil "~A" data))))
 	   'xsd:|string|))
   
 
 (def-soap-simple-content (enc:|decimal| xsd:|decimal|)
   :class soap-connector
   :decode ((declare (ignore options))
-	   (values (or (ignore-errors (parse-decimal data :fraction t))
+	   (values (or (when (null data) 0)
+		       (ignore-errors (parse-decimal data :fraction t))
 		       (call-next-method))))
   :encode ((declare (ignore options))
 	   (xmp-encode-content 
 	    conn 
 	    (let ((int (truncate data)))
 	      (typecase data
+		(null "0")
 		(integer (format nil "~D" int))
 		(float (xmp-encode conn data 'xsd:|double|))
 		(ratio (format-ratio data))
-		)))
-	   'xsd:|decimal|))
+		))
+	    'xsd:|decimal|)))
 
 (defun format-ratio (data &optional (decimals 10))
   (let* ((num (numerator data))
@@ -1111,9 +1403,14 @@
 (def-soap-simple-content (enc:|int| xsd:|int|)
   :class soap-connector
   :decode ((declare (ignore options))
-	   (values (or (ignore-errors (parse-integer data)) (call-next-method))))
+	   (values (or (when (null data) 0)
+		       (ignore-errors (parse-integer data))
+		       (call-next-method))))
   :encode ((declare (ignore options))
-	   (xmp-encode-content conn (format nil "~A" (truncate data)))
+	   (xmp-encode-content conn
+			       (if (null data)
+				   "0"
+				 (format nil "~A" (truncate data))))
 	   'xsd:|int|))
 
 (def-soap-simple-content (enc:|boolean| xsd:|boolean|)
@@ -1131,9 +1428,26 @@
 (def-soap-simple-content (enc:|float| xsd:|float|)
   :class soap-connector
   :decode ((declare (ignore options))
-	   (values (read-from-string data nil nil)))
+	   
+	   ;; Parse the input as a double float to retain excess precision 
+	   ;;  if it is there (some clients/servers ie soapware.org/validator1
+	   ;;  seem to send and expect double precision for xsd:float )
+	   (values (if (null data)
+		       0
+		     (read-from-string (case (length data)
+					 ((0 1 2 3 4 5 6 7 8 9 10)
+					  data)
+					 (otherwise		    
+					  (concatenate 'string data "d0")))
+				       nil nil))
+		   'xsd:|float|))
   :encode ((declare (ignore options))
-	   (let ((f (coerce data 'float)))
+	   (let (f d)
+	     (typecase data
+	       (null (setf f 0.0 d 12))
+	       (double-float (setf f data d 22))
+	       (single-float (setf f data d 12))
+	       (otherwise (setf f (coerce data 'single-float) d 12)))
 	     (xmp-encode-content
 	      conn
 	      (string-trim
@@ -1143,7 +1457,7 @@
 			;; This is conservatively the most significant digits
 			;; in a single-float number, plus room for a leading or
 			;; trailing zero.
-			12
+			d
 			;; This is conservatively the most leading or trailing
 			;; zeroes that will be printed.
 			(abs (truncate (log (abs f) 10))))
@@ -1154,9 +1468,12 @@
   :class soap-connector
   :decode ((declare (ignore options))
 	   ;; Make sure that the data will be parsed as a double-float
-	   (values (read-from-string (concatenate 'string data "d0") nil nil)))
+	   (values 
+	    (if (null data)
+		0
+	      (read-from-string (concatenate 'string data "d0") nil nil))))
   :encode ((declare (ignore options))
-	   (let ((f (coerce data 'double-float)))
+	   (let ((f (coerce (or data 0) 'double-float)))
 	     (xmp-encode-content
 	      conn
 	      (string-trim
@@ -1275,7 +1592,7 @@
 	 ((do ((i indices (cdr i)) (j rank (cdr j)))
 	      ((atom i) t)
 	    (or (< (first i) (first j)) (return nil)))
-	  (setf (apply #'aref array indices) (pop data))
+	  (setf (apply #'aref array indices) (soap-element-content (cdr (pop data))))
 	  (bump-index indices rank))
 	 (t (return)))))
 
@@ -1294,9 +1611,11 @@
 				&rest options &key attributes &allow-other-keys
 				&aux type atype outer res length array a2)
   (multiple-value-setq (type atype res) (soap-decode-type conn attributes :in))
-  (cond (atype
+  (cond ((or atype
+	     (nth-value 3 (xmp-defined-element-defs conn elt :in 1)))
 	 
 	 ;; this code ignores position attributes???
+	 ;;  maybe pos attributes could be saved in array element?
 
 	 (when (member nil (setf length (xmp-getf-in-part conn res :length)))
 	   (setf length nil))
@@ -1305,7 +1624,7 @@
 			 (mapcar #'(lambda (x) (declare (ignore x)) 0) length)
 			 length
 			 data)
-	   (setf array (concatenate 'vector data)))
+	   (setf array (concatenate 'vector (mapcar #'second data))))
 	 (values (list (list elt array)) elt))
 	(type
 	 (if (equal elt type)
@@ -1331,7 +1650,6 @@
 (defmethod soap-must-understand ((conn soap-connector) (elt t))
 
   ;; The application must supply a soap-must-understand method
-  ;;  or declare the element with a :must-understand option ???
   ;;  for any header element that must be understood.
 
   (case (soap-must-understand-flag conn)
@@ -1343,22 +1661,33 @@
 
 
 
+(defmethod xmp-encode ((dest soap-connector) data (type cons)
+		       &rest options &key &allow-other-keys)
+  (declare (ignore options))
+  (soap-encode-parts dest data nil type))
 
 
 (defmethod xmp-encode ((dest soap-connector) data (type t)
-		       &rest options &key &allow-other-keys &aux res)
+		       &rest options &key &allow-other-keys &aux res def)
 
   ;; A default method to encode anything unknown as a string.
 
-  (if (and (setf res (soap-resolve-type dest type :out))
-	   (eq :simple (car res))
-	   (not (eq type (second res)))
-	   (second res)
-	   (atom (second res)))
-      (apply 'xmp-encode dest data (second res) options)
-    (progn
-      (xmp-encode-content dest (format nil "~A" data))
-      'xsd:|string|)))
+  (typecase data
+    (xmp-element (call-next-method))
+    (otherwise
+     (cond ((and (setf res (soap-resolve-type dest type :out))
+		 (eq :simple (first res))
+		 (setf def (second res))
+		 (not (eq type def)))
+	    (apply 'xmp-encode dest data def options))
+	   ((and res
+		 (eq :simple (first res))
+		 (null def)
+		 (setf def (getf (cddr res) :simple-content-key))
+		 (not (eq type def)))
+	    (apply 'xmp-encode dest data def options))
+	   (t (when data (xmp-encode-content dest (format nil "~A" data)))
+	      'xsd:|string|)))))
 
 (defmethod xmp-encode ((dest soap-connector) (data integer) (type null)
 		       &rest options &key &allow-other-keys)
@@ -1376,107 +1705,310 @@
 
 
 
-;;; SOAP Server ???
+;;; SOAP Server
 
 
-(defun soap-message-server (&key start 
-				 (enable :start) introspect
-				 publish 
-				 (class 
-				  'soap-aserve-server-string-in-out-connector)
-				 )
-  (or (member :path publish) (setq publish (list* :path "/RPC2" publish)))
+(defun soap-message-server (&rest keys &key start 
+				  (enable :start)
+				  publish 
+				  (class 
+				   'soap-aserve-server-string-in-out-connector)
+				  &allow-other-keys)
+  ;; keys passed to make-instance:
+  ;;   action lisp-package
+  (or (member :path publish) (setq publish (list* :path "/SOAP" publish)))
   (when (or (member :function publish) (member :content-type publish))
-    (xmp-error nil 'server-argument-error :sub-code :make-soap-server
+    (xmp-error nil 'soap-server-argument :sub-code :soap-message-server
 	   :string "does not allow :function or :content-type arguments"))
-  (let ((server (make-instance class :start start :parameters publish)))
-    (when introspect (xmp-export-standard-methods server :enable t))
+  (let ((server (apply 'make-instance class :start start :parameters publish
+		       (remove-keys '(:start :enable :publish :class) keys))))
     (case enable 
       ((nil) nil)
       (:start (xmp-start-server server :enable t))
       (otherwise (xmp-enable-server server)))
     server))
 
-
-
 (defmethod xmp-export-standard-methods ((server soap-server-connector)
-					&key enable &allow-other-keys)
-  (xmp-export-method
-   server "system.listMethods" nil
-   :lisp-name 'xmp-list-methods
-   :return :|array|
-   :enable enable
-   :help
-   "Returns an array of the names of all the exported methods on the server."
-   )
-  (xmp-export-method
-   server "system.methodSignature" '(:|string|)
-   :lisp-name 'xmp-method-signature
-   :return :|array|
-   :enable enable
-   :help
-   "Returns an array of signature arrays: ((return-type arg-type ...) ...)."
-   )
-  (xmp-export-method
-   server "system.methodHelp" '(:|string|)
-   :lisp-name 'xmp-method-help
-   :return :|string|
-   :enable enable
-   :help
-   "Returns a string describing a method.")
+					&key &allow-other-keys)
   t)
 
-(defmethod xmp-invoke-method ((server soap-server-connector) fn args)
-  (case fn
-    ((xmp-list-methods xmp-method-signature xmp-method-help)
-     (apply fn server args))
-    (otherwise (call-next-method))))
+
+(defmethod xmp-server-response ((server soap-aserve-server-connector)
+				&key request entity &allow-other-keys
+				&aux action)
+  (setf action (xmp-header-slot request :|SOAPAction|))
+  (call-next-method server :request request :entity entity 
+		    :options (list :action action)))  
+
+(defmethod soap-invoke-method :around ((server soap-server-connector) (name t) (args t)
+				       &key headers)
+  (declare (ignore headers))
+  (let ((*soap-server* server))
+    (call-next-method)))
+
+(defmethod soap-invoke-method ((server soap-server-connector) (name t) (args t)
+			       &key headers)
+  (declare (ignore headers))
+  (xmp-invoke-method server name args))
 
 
+
+(defvar *soap-last-server* nil)
 (defmethod xmp-server-implementation ((server soap-aserve-server-connector) body
-				      &rest options &key &allow-other-keys)
+				      &rest options &key action &allow-other-keys)
   (declare (ignore options))
   ;; parse an rpc call and pass it to the exported function
   (when (xmp-server-enabled server)
+    (setf *soap-last-server* server)
     (let* (code string rval)
       (multiple-value-bind (v e)
 	  (ignore-errors
 	    (let* ((r (xmp-decode-message
 		       server
-		       ;; namespaces???
+		       ;; xmp-parse-message automatically includes
+		       ;;  message-dns namespaces
 		       (xmp-parse-message server body)))
-		   (method (second r))
-		   (signature (third r))
-		   (params (fourth r))
+		   (body (second (assoc :body (cdr r))))
+		   (headers (assoc :headers (cdr r)))
+		   (method (first body))
+		   (signature (list* action nil (mapcar #'car (cdr body))))
+		   (params (mapcar
+			    #'(lambda (x) (soap-element-content (cdr x)))
+			    (cdr body)))
 		   )
+
+	      (setf params (mapcan #'list (cddr signature) params))
 	      (multiple-value-bind (fn rt)
 		  (xmp-accept-method server method signature params)
-		(let ((vals (multiple-value-list
-			     (xmp-invoke-method server fn params))))
-		  (if (null vals)
-		      (xmp-error server :client :string "Call refused")
-		    (setf rval (xmp-encode-object server (first vals) rt))))
-		)
+		(if (null fn)
+		    (xmp-error server :client :string "Undefined method")
+		  (let ((vals (multiple-value-list
+			       (soap-invoke-method server fn params
+						   :headers headers))))
+		    (if (null vals)
+			(xmp-error server :client :string "Call refused")
+		      (let (relt rtype)
+			(etypecase rt
+			  (symbol
+			   ;; must be element name
+			   (setf relt rt rtype (soap-find-element server rt :out)))
+			  (cons (ecase (first rt)
+				  (:element (setf relt (xmp-pick-name server rt)
+						  rtype (third rt))))))
+			(setf rval (soap-encode-object
+				    server relt rtype (first vals))))))
+		  ))
 	      nil))
 	(declare (ignore v))
-	(when e
-	  (setf code 2
-		string (format nil "Error in RPC call: ~A" e)))
-	(when code
-	  (setf rval (soap-make-fault server code string)))
+	(typecase e
+	  (xmp-condition (setf rval (soap-make-fault
+				 server
+				 (xmp-fault-code e)
+				 (xmp-fault-string e)
+				 :sub-code (xmp-fault-sub-code e)
+				 :factor (xmp-fault-factor e)
+				 :detail (xmp-fault-detail e))))
+	  ((member nil)
+	   (when code
+	     (setf rval (soap-make-fault server code string))))
+	  (otherwise
+	   (setf rval (soap-make-fault server :LispError (format nil "~A" e)))))
 	(soap-encode-message server rval nil)
 	))))
 
+(defmethod xmp-signature-equal ((conn soap-connector) ss1 ss2
+				&aux (s1 ss1) (s2 ss2) k1 k2 lswap pc)
+  ;; SOAP  sig -> (action collector elt-name ... )
+  ;;    action -> string
+  ;; collector -> nil  :seq  :seq1  :set  :set1
+  ;;  elt-name -> symbol  string  (:any-case string) (:any)
+  (cond
+   ((or (atom ss1) (atom ss2)) nil)
+   ((and (second ss1) (null (second ss2))) (xmp-signature-equal conn ss2 ss1))
+   ((and (first ss2) (not (equal (first ss1) (first ss2)))) nil)
+   ((null (second ss2))
+    (xmp-error conn :internal :string "Comparing two candidate signatures 1."))
+   (t (pop s1) (pop s2)
+      (setf k1 (pop s1) k2 (pop s2))
+      (cond ((and k1 (null k2)) (xmp-signature-equal conn ss2 ss1))
+	    ((null k2)
+	     (xmp-error conn :internal :string "Comparing two candidate signatures 2."))
+	    ((case k1
+	       ((nil) t)
+	       (:seq (case k2
+		       (:seq (setf lswap t pc t))
+		       (:seq1 (rotatef k1 k2) (setf lswap t pc t))
+		       (:set (setf lswap t pc t))
+		       (:set1 (rotatef k1 k2) (setf lswap t pc t))
+		       (otherwise
+			(xmp-error conn :internal :string "Ill-formed signature 1."))))
+	       (:seq1 (case k2
+			(:seq (setf lswap t pc t))
+			(:seq1 t)
+			(:set (setf lswap t pc t))
+			(:set1 t)
+			(otherwise
+			 (xmp-error conn :internal :string "Ill-formed signature 2."))))
+	       (:set  (case k2
+			(:seq (rotatef k1 k2) (setf lswap t pc t))
+			(:seq1 (rotatef k1 k2) (setf lswap t pc t))
+			(:set (setf lswap t pc t))
+			(:set1 (rotatef k1 k2) (setf lswap t pc t))
+			(otherwise
+			 (xmp-error conn :internal
+				    :string "Ill-formed signature 3.")))  )
+	       (:set1  (case k2
+			 (:seq (setf lswap t pc t))
+			 (:seq1 (rotatef k1 k2) t)
+			 (:set (rotatef k1 k2) (setf lswap t pc t))
+			 (:set1 t)
+			 (otherwise
+			  (xmp-error conn :internal
+				     :string "Ill-formed signature 4."))) )
+	       (otherwise
+		(xmp-error conn :internal :string "Ill-formed signature 5.")))
+	     (when lswap
+	       (when (< (length s2) (length s1)) (rotatef s1 s2)))
+	     (flet ((eeq (e1 e2)
+			 (or (eq e1 e2)
+			     (typecase e1
+			       (symbol (typecase e2
+					 (string (equal (string e1) e2))
+					 (cons   (string-equal
+						  (string e1) (second e2)))))
+			       (string (typecase e2
+					 (symbol (equal e1 (string e2)))
+					 (string (equal e1 e2))
+					 (cons   (string-equal e1 (second e2)))))
+			       (cons   (typecase e2
+					 (symbol (string-equal (second e1) (string e2)))
+					 (string (string-equal (second e1) e2))
+					 (cons   (string-equal
+						  (second e1) (second e2)))))))))
+	       (when (ecase k2
+		       (:seq
+			(dolist (e1 s1
+				    ;; Match is good if s1 is a sub-sequence of s2.
+				    t)
+			  (or (setf s2 (member e1 s2 :test #'eeq))
+			      (return nil))
+			  (pop s2)))
+		       (:seq1
+			;; We need an exact match.
+			(every #'eeq s1 s2))
+		       (:set
+			(let (found i)
+			  (dolist (e1 s1)
+			    (setf i 0)
+			    (or
+			     (dolist (e2 s2)
+			       (when (eeq e1 e2)
+				 (if (member i found)
+				     (return nil)
+				   (return (push i found))))
+			       (incf i))
+			     (return nil)))
+			  ;; Match is good if every element in s1 was found
+			  ;;  exactly once in s2.
+			  (equal (length found) (length s1))))
+		       (:set1
+			(let (found)
+			  (dotimes (i (length s2)
+				      ;; Match is good if s1 and s2 contain the same
+				      ;;  elements but for order.
+				      (equal (length found) (length s1))
+				      )
+			    (if (member (elt s2 i) s1 :test #'eeq)
+				(push i found)
+			      (return nil)))))
+		       )
+		 (cond ((null pc) t)
+		       ((and (eq k1 k2)
+			     (eql (length s1) (length s2)))
+			t)
+		       (t (xmp-error conn :def
+				     :string "Conflicting signatures.")))
+		 )))))))
+
+
+
 (defmethod soap-make-fault ((server soap-server-connector) code string
-			    &key factor detail)
-  ;;;???
-  (list  code string factor detail)
-  )
+			    &key factor detail sub-code)
+  (soap-encode-object server 
+		      'env:|Fault|
+		      nil
+		      `(:|faultcode| 
+			 ,(if sub-code
+			     (intern
+			      (format nil "~A.~A" code sub-code)
+			      (symbol-package code))
+			   code)
+			 :|faultstring| ,string
+			 ,@(when factor (list :|faultactor| factor))
+			 ,@(when detail (list :|detail| detail)))
+		      ))
 
 
 
+(defmethod soap-export-method ((conn soap-server-connector) name sig
+			       &rest keys
+			       &key lisp-name (enable t) return help
+			       (action nil a-p) ordered exact
+			       &allow-other-keys)
+  ;; if action is specified as nil then ignore message action
+  ;; if action is omitted, then use soap-server-action as default
+  ;;                            :none -> nil
+  ;; return -> element-name | element-def 
+  (case action 
+    (:none (setf action nil a-p t))
+    (:default (setf action nil a-p nil)))
+  (or action a-p
+      (typecase (setf action (soap-server-action conn))
+	((member :none) (setf action nil a-p t))
+	((member nil) nil)))
+  (typecase action
+    ((member nil) nil)
+    (string nil)
+    (symbol (setf action (symbol-name action)))
+    (otherwise (xmp-error conn :def :string "Action must be symbol or string.")))
+  (or action a-p
+      (xmp-error conn :def :string "Action must be specified."))      
+  (xmp-export-method conn name
+		     (list* action
+			    (if ordered
+				(if exact
+				    :seq1
+				  :seq)
+			      (if exact
+				  :set1
+				:set))
+			    sig)
+		     :lisp-name lisp-name
+		     :enable enable
+		     :return return
+		     :help help))
 
+(defun soap-element-content (v)
+  (cond ((atom v) v)
+	((and (atom (first v)) (null (cdr v))) (first v))
+	(t v)))
 
+(defun soap-sub-element-content (v name)
+  (and (consp v)
+       (consp (first v))
+       (setf v (assoc name v))
+       (soap-element-content (cdr v))))
 
+(defun soap-alist-to-plist (l &optional recursive)
+  (if (consp l)
+      (mapcan #'(lambda (x)
+		  (when (consp x)
+		    (list (first x)
+			  (let ((y (soap-element-content (cdr x))))
+			    (if recursive
+				(soap-alist-to-plist y)
+			      y)))))
+	      l)
+    l))
 
 

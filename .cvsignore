@@ -1,0 +1,4 @@
+DIST*
+*.out
+soapa.cl
+soapm.cl

@@ -1,9 +1,9 @@
 
-;; $Id: README.txt,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: README.txt,v 1.2 2003/12/11 05:38:48 layer Exp $
 
  The SOAP module requires xmlutils version 7.0.1 which has been
- committed on the trunk.  
- It will signal error if the wrong xmlutils is loaded.
+ committed on the trunk.  It will signal error if the wrong xmlutils
+ is loaded.
 
  STEP 1 - build and/or load the right xmlutils
 
@@ -58,14 +58,12 @@
 
 RELEASED FILES:
 
-   [pxml.fasl    -- built separately]
     soap.fasl    -- common loader stub must be compiled in Modern ACL
     soapa.fasl   -- ANSI version
     soapm.fasl   -- Modern version
 
-    soap-client.html (from soap-client.txt?)
-   
-    soapex.cl    -- examples
+    soapex.cl    -- client examples
+    soapval1.cl  -- server example
 
 
 

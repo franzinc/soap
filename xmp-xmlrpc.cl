@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-xmlrpc.cl,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: xmp-xmlrpc.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
 
 ;; Support for XMLRPC protocol over HTTP.
 
@@ -459,8 +459,8 @@
 						  :|struct| :|array|)))
 (define-xmp-element nil ':|struct|         '(:complex (:seq* :|member|)))
 (define-xmp-element nil ':|member|         '(:complex (:seq1 :|name| :|value|)))
-(define-xmp-element nil ':|array|          '(:complex (:seq* :|data|)))
-(define-xmp-element nil ':|data|           '(:complex (:seq1 :|value|)))
+(define-xmp-element nil ':|array|          '(:complex (:seq1 :|data|)))
+(define-xmp-element nil ':|data|           '(:complex (:seq* :|value|)))
 
 (define-xmp-element nil ':|int|              '(:simple nil
 						       :simple-content-key :|int|))
@@ -748,18 +748,21 @@
       (apply 'xmp-encode dest data :|struct| options)
     (apply 'xmp-encode dest data :|array| options)))
 
+#+ignore
 (defmethod xmp-encode ((dest xmlrpc-connector) (data xmp-struct) (type null)
 		       &rest options &key &allow-other-keys)
   (declare (ignore options))
   (xmp-encode dest (xmp-members data) :|struct|)
   :|struct|)
 
+#+ignore
 (defmethod xmp-encode ((dest xmlrpc-connector) (data xmp-array) (type null)
 		       &rest options &key &allow-other-keys)
   (declare (ignore options))
   (xmp-encode dest (xmp-members data) :|array|)
   :|array|)
 
+#+ignore
 (defmethod xmp-encode ((dest xmlrpc-connector) (data xmp-member) (type null)
 		       &rest options &key &allow-other-keys &aux name)
   (declare (ignore options))

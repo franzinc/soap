@@ -16,24 +16,31 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: xmp-test.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
 
 ;; Internal-use test cases
 
 (in-package :user)
 
 (eval-when (compile load eval)
-  (require :pxml)
   (require :soap)
+  (load (compile-file-if-needed "soapval1.cl"))
+  (load (compile-file-if-needed "soapex.cl"))
   )
 
-(defpackage :user (:use :net.xmp :net,xmp.soap)) 
+(defpackage :user (:use :net.xmp.soap)) 
+
+(defpackage :net.xmp.schema (:use) (:nicknames :xs :xsd))
+(defpackage :net.xmp.schema-instance (:use) (:nicknames :xsi))
+(defpackage :net.xmp.soap.none (:use) (:nicknames :none))
+(defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
+(defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
 
 
 
-(defun s1 () (net.xmp::xmp-schema "envelope.xml"))
-(defun s2 () (net.xmp::xmp-schema "encoding.xml"))
-(defun s3 () (net.xmp::xmp-schema "XMLSchema.xml"))
+(defun s1 () (net.xmp::decode-schema "envelope.xml"))
+(defun s2 () (net.xmp::decode-schema "encoding.xml"))
+(defun s3 () (net.xmp::decode-schema "XMLSchema.xml"))
 
 (defun sp (&optional (n 1) (d :warn) (u nil))
   (let ((s (soap-message-client :lisp-package :keyword
@@ -46,15 +53,11 @@
 (defclass ct1 (xmp-string-in-connector) ())
 (defmethod xmp-begin-message ((conn ct1)) (list :seq1 (list :or :ct1 :ct2)))
 (defmethod xmp-end-message ((conn ct1) data &key types &allow-other-keys)
-  (values data types))
-(defmethod xmp-simple-content ((conn ct1) (elt (eql :int)) data &rest options
-			       &key attributes &allow-other-keys)
-  (values (parse-integer data)))
-(defmethod xmp-simple-content ((conn ct1) (elt (eql :string)) data &rest options
-			       &key attributes &allow-other-keys)
-  data)			       
-(define-xmp-element nil :ct1 '(:complex (:or (:seq (:element :foo :int) :bar)
-					     (:seq (:element :foo :string) :baz))))
+  (values data types))			       
+(net.xmp:define-xmp-element nil :ct1 '(:complex 
+				       (:or 
+					(:seq (:element :foo xsd:|int|) :bar)
+					(:seq (:element :foo xsd:|string|) :baz))))
 (defun ct1 ()
   (let* ((conn (make-instance 'ct1)))
     (list
@@ -67,8 +70,9 @@
      conn)))
 
 ;;; This kind of definition should be avoided (or prohibited)
-;;;      element foo has two conflicting definitions
-(define-xmp-element nil :ct2 '(:complex (:or (:seq (:element 
+;;;      element foo has two conflicting definitions.
+;;; This is not legal in XML Schema definition.
+(net.xmp:define-xmp-element nil :ct2 '(:complex (:or (:seq (:element 
 						    :foo 
 						    (:complex (:seq :bar :baz)))
 						   :bob)
@@ -95,7 +99,446 @@
 
 
 
+
+
+;;; SOAP Server Tests
+
+(define-soap-element nil :soap-method-1
+  '(:complex (:seq (:element :|elt1| enc:|int|)
+		   (:element :|elt2| enc:|int|)
+		   (:element :|elt3| enc:|int|)
+		   )
+	     :action "uri:method1"
+	     ))
+(define-soap-element nil :soap-result-1 '(:simple enc:|int|))
+(defun soap-method-1 (&key (elt1 0) (elt2 0) (elt3 0)) (+ elt1 elt2 elt3))
+(defun ss1 (&key (index 1 )(port 4567) (path "/SOAP"))
+  (let ((server (soap-message-server :start `(:port ,port)
+				     :publish `(:path ,path)
+				     :lisp-package :keyword
+				     )))
+
+    (soap-export-method server :soap-method-1 '(:elt1 :elt2 :elt3)
+			:return :soap-result-1
+			:action "uri:method1"
+			:lisp-name 'soap-method-1)
+    (let* ((client (soap-message-client :url (format nil "http://localhost:~A~A"
+						     port path)
+					:lisp-package :keyword
+					))
+	   (result
+	    (list
+	     (case index
+	       ((:all 1)
+		(call-soap-method client :soap-method-1 :elt1 111 :elt2 222 :elt3 333)))
+	     (case index
+	       ((:all 2)
+		(call-soap-method client :soap-method-1 :elt1 123)))
+	     (case index
+	       ((:all 3)
+		(call-soap-method client :soap-method-1 :elt2 456)))
+	     (case index
+	       ((:all 4)
+		(call-soap-method client :soap-method-1 :elt3 789)))
+	     (case index
+	       ((:all 5)
+		(call-soap-method client :soap-method-1 :elt3 444 :elt1 333)))
+	     ))
+	   )
+      (values result server client net.xmp.soap::*soap-last-server*)
+      )))
+
+
+(defpackage :amazon (:use))
+(defparameter *base-dns-tail*
+  (list 
+   (list :net.xmp.schema
+	 "xs"
+	 "http://www.w3.org/2001/XMLSchema")
+   (list :net.xmp.schema-instance
+	 "xsi"
+	 "http://www.w3.org/1999/XMLSchema-instance")))
+(defparameter *amazon-dns*
+  (list*
+   nil
+   (list :amazon
+	 "typens"
+	 "http://soap.amazon.com")
+   *base-dns-tail*))
+(defparameter *google-dns*
+  (list*
+   nil
+   (list :gg
+	 "typens"
+	 "urn:GoogleSearch")
+   *base-dns-tail*))
+
+
+(defun wsdl01 (&optional (file "Atest.xml")
+			verbose
+			(ns *amazon-dns*)
+			&aux 
+			(net.xmp.soap:*wsdl-default-namespaces*
+			 net.xmp.soap:*wsdl-1.1-namespaces*)
+			) 
+  (let* ((res (multiple-value-list
+	      (net.xmp.soap:decode-wsdl-file
+	       file :namespaces ns :lisp-package :keyword)))
+	 (conn (first res)))
+    (when verbose
+      (format t "~&~%;; TYPES~%~S~%" (net.xmp:schema-types conn))
+      (format t "~&~%;; MESSAGES~%~S~%" (net.xmp.soap::wsdl-messages conn))
+      (format t "~&~%;; INTERFACES~%~S~%" (net.xmp.soap::wsdl-interfaces conn))
+      (format t "~&~%;; PORT-TYPES~%~S~%" (net.xmp.soap::wsdl-port-types conn))
+      (format t "~&~%;; BINDINGS~%~S~%" (net.xmp.soap::wsdl-bindings conn))
+      (format t "~&~%;; SERVICES~%~S~%" (net.xmp.soap::wsdl-services conn))
+      )
+    (values-list res)))
+	 
+
+
+(defun wsdl11 (&optional verbose) (wsdl01 "Atest.xml" verbose))
+(defun wsdl21 (&optional verbose) (wsdl01 "AmazonWebServices.xml" verbose))
+(defun wsdl31 (&optional verbose) (wsdl01 "AmazonWSDLm.xml" verbose)) 
+
+(defun wsdl41 (&optional verbose)
+  (wsdl01 "c:/franz/_current/soap/googleapi/GoogleSearch.wsdl" verbose *google-dns*))
+
+(defun wsdl51 (&optional verbose eval (dest t))
+  (net.xmp.soap::make-client-interface (wsdl41 verbose) 0 dest :eval eval))
+(defun wsdl52 (&optional verbose (eval t) (dest t))
+  (net.xmp.soap::make-server-interface (wsdl41 verbose) 0 dest :eval eval))
+
+(defun wsdl61 (&optional verbose eval)
+  (net.xmp.soap::make-client-interface
+   (wsdl01 "c:/franz/_current/soap/googleapi/GoogleSearch.wsdl" verbose
+	  (list* nil *base-dns-tail*))
+   0 t :eval eval))
+
+(defun wsdl71 (&optional verbose eval (dest t))
+  (net.xmp.soap::make-client-interface (wsdl21 verbose) 0 dest :eval eval))
+(defun wsdl81 (&optional verbose eval (dest t))
+  (net.xmp.soap::make-client-interface (wsdl31 verbose) 0 dest :eval eval))
+
+
+
+
+
+
+(defun test-clients (&key index (error-p nil) val-p &aux (fail 0) answer)
+
+  (macrolet ((run-one (this body &optional expected)
+		      `(when (or (null index) (eql index ,this))
+			 (let ((res (if error-p
+					,body
+				      (multiple-value-bind (v e)
+					  (ignore-errors (multiple-value-list ,body))
+					(if e
+					    (list nil e)
+					  v)))))
+			   (if val-p 
+			       (setf answer res)
+			     (setf res (test-res res ',expected)))
+			   (format t "~&;;~2D. ~A~%" ,this res)))))
+    (flet ((test-res (res ex &aux elt)
+		     (cond ((null (first res))
+			    (incf fail)
+			    (format nil "~A" (second res)))
+			   (t (setf elt (if (consp (first res))
+					    (first (first res))
+					  (first res)))
+			      (cond ((null ex)
+				     (format nil "~S" elt))
+				    ((eq elt ex) "OK")
+				    (t (incf fail)
+				       (format nil "Expected ~S found ~S" ex elt)))))))
+
+
+      (run-one 01 (sp01))
+      (run-one 10 (sp10) temp::|getTempResponse|)
+      (run-one 21 (sp21) baseball::|GetTeamsResponse|)
+      (run-one 22 (sp22) baseball::|GetPlayersResponse|)
+      (run-one 30 (sp30) temp:|getRateResponse|)
+      (run-one 40 (sp40) temp::|getVersionResponse|)
+      (run-one 51 (sp51) temp:|SearchRecipesResponse|)
+      ;; (run-one 52 (sp52 id))
+      (run-one 61 (gs)  gg:|doGoogleSearchResponse|)
+      (run-one 62 (gsp) gg:|doSpellingSuggestionResponse|)
+      (run-one 63 (gcp) gg:|doGetCachedPageResponse|)
+
+      (format t "~%;;; ~S tests failed.~%" fail)
+      (if val-p (values-list answer) (eql 0 fail))
+      )))
+ 
+(defun random-string (min limit &optional inc1 inc2)
+  (let* ((ln (+ min (random (- limit min))))
+	 (s (make-string ln))
+	 (data0  "abcdefghijklmnopqrstuvwxyz0123456789")
+	 (data1  "abcdefghijklmnopqrstuvwxyz0123456789+-_&%@!:;'/.,")
+	 (data2  "abcdefghijklmnopqrstuvwxyz0123456789*$#[]{}|?><")
+	 (data12 "abcdefghijklmnopqrstuvwxyz0123456789+-_&%@!:;'/.,*$#[]{}|?><")
+	 (data (cond ((and inc1 inc2) data12)
+		     (inc1 data1)
+		     (inc2 data2)
+		     (t data0)))
+	 )
+    (dotimes (i ln s)
+      (setf (elt s i)
+	    (elt data (random (length data)))))))
+
+
+(defvar *server* nil)
+(defun test-validator1 (&key index (port 8080)
+			     (host "localhost")
+			     (path *validator1-path*)
+			     (reps 10)
+			     (stop t)
+			     (verbose nil)
+			     (error-p t)
+			     &aux fail)
+  (setf *server* (make-validator1-server port))
+  (macrolet ((run-one (body)
+		      `(when (or (null index) (eql index this))
+			 (dotimes (n reps)
+			   (if error-p
+			       ,body
+			     (multiple-value-bind (v e)
+				 (ignore-errors (multiple-value-list ,body))
+			       (if e
+				   (let ()
+				     (push this fail)
+				     (values nil e))
+				 v)))))))
+
+    (let ((client (soap-message-client :url (format nil "http://~A:~A~A"
+						    host port path)
+				       :lisp-package :keyword
+				       :message-dns *validator1-dns*
+				       ))
+	  (this 0))
+
+      (flet ((fmt (&rest args) (when verbose (apply 'format t args))))
+	(flet ((run1
+		(n)
+		(declare (ignore n))
+		;; countTheEntities
+		(let* ((lb (random 10))
+		       (rb (random 10))
+		       (am (random 10))
+		       (ap (random 10))
+		       (qt (random 10))
+		       (sp (+ lb rb am ap qt))
+		       (ch (+ 10 (* sp (+ 2 (random 5)))))
+		       (all (+ sp ch))
+		       (sch `( 
+			      ,@(if (zerop lb) nil (list (list #\< lb)))
+			      ,@(if (zerop rb) nil (list (list #\> rb)))
+			      ,@(if (zerop am) nil (list (list #\& am)))
+			      ,@(if (zerop ap) nil (list (list #\' ap)))
+			      ,@(if (zerop qt) nil (list (list #\" qt)))
+			      ))
+		       (data (let ((data (make-string all)))
+			       (dotimes (i all data)
+				 (setf
+				  (elt data i)
+				  (if sch
+				      (if (< (random (+ sp ch)) sp)
+					  (let* ((j (random (length sch)))
+						 (item (elt sch j))
+						 (char (first item))
+						 (count (second item)))
+					    (decf (second item)) (decf sp)
+					    (when (eql count 1)
+					      (setf sch (remove item sch)))
+					    char)
+					(let ()
+					  (decf ch)
+					  (elt "abcdefghijklmnopqrstuvw" (random 23))))
+				    (elt "abcdefghijklmnopqrstuvw" (random 23)))))))
+		       (rep (call-soap-method client "countTheEntities" :|s| data))
+		       (res (soap-sub-element-content (cdr rep) :|struct|))
+		       )
+		  (if (and (eql lb (soap-sub-element-content
+				    res :|ctLeftAngleBrackets|))
+			   (eql rb (soap-sub-element-content
+				    res :|ctRightAngleBrackets|))
+			   (eql am (soap-sub-element-content res :|ctAmpersands|))
+			   (eql ap (soap-sub-element-content res :|ctApostrophes|))
+			   (eql qt (soap-sub-element-content res :|ctQuotes|)))
+		      (fmt "~&;;~2D. ok all=~S~%" this all)
+		    (error "bad result ~S ~S" data rep))
+		  ))
+	       (run2
+		(n)
+		(declare (ignore n))
+		;; easyStructTest
+		(let* ((m (random 100))
+		       (l (random 100))
+		       (c (random 100))
+		       (rep (call-soap-method client "easyStructTest"
+					      :|stooges|
+					      (list :|moe| m :|larry| l :|curly| c)))
+		       (num (soap-sub-element-content (cdr rep) :|number|)))
+		  (if (eql num (+ m l c))
+		      (fmt "~&;;~2D. ok num=~S~%" this num)
+		    (error "bad result ~S ~S"
+			   (list :|moe| m :|larry| l :|curly| c) rep))))
+	       (run3
+		(n)
+		;; echoStructTest
+		(let* ((out (let (new)
+			      (dotimes (j (+ 2 (random 5)))
+				(setf new
+				      (append
+				       new
+				       (list
+					(intern (format nil "substruct~A" j) :keyword)
+					(list :|moe|   (format nil "~A" (random 10))
+					      :|larry| (format nil "~A" (random 10))
+					      :|curly| (format nil "~A" (random 10))
+					      )))))
+			      new))
+		       (rep (call-soap-method client "echoStructTest" :|myStruct| out))
+		       (res (soap-sub-element-content (cdr rep) :|myStruct|))
+		       )
+		  (if (equal out (soap-alist-to-plist res t))
+		      (fmt "~&;;~2D. ok n=~S~%" this n)
+		    (error "bad result ~S ~S" out rep))))
+	       (run4
+		(n)
+		(let* ((num (random 100))
+		       (bool (eql 1 (random 2)))
+		       (st (random-string 5 15))
+		       (db (random 10.1))
+		       (dt (format nil "~A" (random 100000)))
+		       (bin (random-string 50 100))
+		       (out (list num bool st db dt bin))
+		       (rep (call-soap-method client "manyTypesTest"
+					      :|num| num
+					      :|bool| bool
+					      :|state| st
+					      :|doub| db
+					      :|dat| dt
+					      :|bin| bin))
+		       (res (soap-sub-element-content (cdr rep) :|Result|))
+		       )
+		  (if (and (arrayp res) 
+			   (equal '(6) (array-dimensions res))
+			   (equal out (concatenate 'list res)))
+		      (fmt "~&;;~2D. ok n=~S~%" this n)
+		    (error "bad result ~S ~S" out res)))
+		)
+	       (run5
+		(n)
+		;; moderateSizeArrayCheck
+		(let* (out rep res)
+		  (dotimes (i (+ 5 (random 100)))
+		    (push (random-string 1 10) out))
+		  (setf rep (call-soap-method client "moderateSizeArrayCheck"
+					      :|myArray| out))
+		  (setf res (soap-sub-element-content (cdr rep) :|result|))
+		  (if (equal res (concatenate 'string (first out) (first (last out))))
+		      (fmt "~&;;~2D. ok n=~S alen=~S~%" this n (length out))
+		    (error "bad result ~S ~S" out res))))
+	       (run6
+		(n)
+		;; nestedStructTest
+		(flet ((random-days 
+			(from to)
+			(let* (new (days (random (1+ (- to from)))))
+			  (dotimes (i days (reverse new))
+			    (push (read-from-string (format nil ":day~2,'0D"
+							    (+ from i)))
+				  new)
+			    (push (list :|moe| 0 :|larry| 0 :|curly| 0) new)))))
+		  (flet ((random-months
+			  (from to)
+			  (let* (new (mos (random (1+ (- to from)))))
+			    (dotimes (i mos (reverse new))
+			      (push (read-from-string (format nil ":month~2,'0D"
+							      (+ from i)))
+				    new)
+			      (push (random-days 1 30)  new)))))
+		    (let* ((m (random 100))
+			   (l (random 100))
+			   (c (random 100))
+			   (out `(:|year2000|
+				   ( ,@(random-months 1 3)
+				       |month04|
+				       (:|day01|
+					 (:|moe| ,m :|larry| ,l :|curly| ,c))
+				       ,@(random-days 2 30)
+				       ,@(random-months 5 12)
+				       )))
+			   (rep (call-soap-method client "nestedStructTest"
+						  :|myStruct| out))
+			   (res (soap-sub-element-content (cdr rep) :|result|))
+			   )
+		      (if (eql res (+ m l c))
+			  (fmt "~&;;~2D. ok n=~S mlc=~S~%" this n (list m l c))
+			(error "bad result ~S ~S" out rep)))
+		    )))
+	       (run7
+		(n)
+		(let* ((num (random 1000))
+		       (rep (call-soap-method client "simpleStructReturnTest"
+					      :|myNumber| num)))
+		  (if (equal rep
+			     (list  :|simpleStructReturnTestResult|
+				    (list :|struct|
+					  (list :|times10| (* num 10))
+					  (list :|times100| (* num 100))
+					  (list :|times1000| (* num 1000))
+					  )))
+		      (fmt "~&;;~2D. ok n=~S mnum=~S~%" this n num)
+		    (error "bad result ~S ~S" num rep))))
+	       (run8
+		(n &aux (rep (call-soap-method client "whichToolkit")))
+		(if (equal rep
+			   '(:|whichToolkitResult|
+			      (:|struct|
+				(:|toolkitDocsUrl| "http://franz.com")
+				(:|toolkitName| "Allegro Common Lisp SOAP")
+				(:|toolkitVersion| "6.2")
+				(:|toolkitOperatingSystem| "Windows and Unix"))))
+		    (fmt "~&;;~2D. ok n=~S~%" this n)
+		  (error "bad result ~S" rep)))
+	       )
+ 
+	  (incf this)
+	  (run-one (run1 n))
+	  (incf this)
+	  (run-one (run2 n))
+	  (incf this)
+	  (run-one (run3 n))
+	  (incf this)
+	  (run-one (run4 n))
+	  (incf this)
+	  (run-one (run5 n))
+	  (incf this)
+	  (run-one (run6 n))
+	  (incf this)
+	  (run-one (run7 n))
+	  (incf this)
+	  (run-one (run8 n))
+		
+	  (when stop (net.xmp:xmp-stop-server *server*))
+
+	  (if fail
+	      (values nil fail)
+	    :all-ok))))))
+
+
+
+
+
+
+
 ;;; Test code to verify class precedence lists
+
+#+ignore
+(in-package :net.xmp.xmlrpc)
+
 #+ignore
 (eval-when (compile)
   (dolist (n '(

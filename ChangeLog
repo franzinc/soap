@@ -1,0 +1,99 @@
+2003-12-01  Kevin Layer  <layer@crikey>
+
+	* Makefile,
+	* build.cl,
+	* soap.cl: incf version in defpatch
+
+2003-11-25  Martin Mikelsons <mm@ketchtoo>
+	
+	* xmp-test.cl (wsdl5): add WSDL tests and more
+	* xmp-wsdl.cl: NEW FILE
+	* xmp-schema.cl: add many more typesand many changes for WSD support
+	* xmp-base.cl (xmp-decode-element): new method
+	          (xmp-match-complex-tail): correct serious bugs in complex cases
+	          and many changes for WSD support
+	* xmp-aserve.cl (xmp-enable-server): set aserve-server slot from default var
+	* soapval1.cl: add package nickname defs
+	* soapex.cl: add package nickname defs
+	* build.cl: add xmp-wsdl file
+	* xmp-soap.cl (soap-encode-element): add :encoding option for encodingStyle attr
+	          and many changes for WSD support
+	* xmp-xmlrpc.cl: upgrade to lates version of xmp
+
+
+2003-09-30  Martin Mikelsons <mm@ketchtoo>
+	
+	* soapex.cl (sp10): fix case portability problem
+	     (doGoogleSearchResponse): fix case portability problem
+	* xmp-test.cl: fix some case portability problems
+
+	
+2003-09-29  Martin Mikelsons <mm@ketchtoo>
+
+	* xmp-test.cl (test-clients): test all remote client examples
+	           (test-validator1): test validator1 server with varying data
+	* xmp-soap.cl (enc:|float| xsd:|float|): keep extra digits of precision
+	* xmp-soap.cl (soap-encode-parts): emit empty elements in :seq1
+	* xmp-base.cl (xmp-match-element-def): test strings with equal
+	             (xmp-normal-complex-def): use second value from 
+	                                       xmp-decode-qualified-name
+
+	
+2003-09-25  Kevin Layer  <layer@crikey>
+
+	* Makefile: soap-client.htm is history; tweaks
+	* build.cl: incf the patch #
+	* soap.cl: update defpatch
+
+2003-09-23  Martin Mikelsons <mm@ketchtoo>
+
+	* soapex.cl (simple-server): simple server example and test
+	* xmp-soap.cl (xmp-server-implementation): SOAP server changes
+	* xmp-soap.cl (soap-alist-to-plist): add recursive argument
+	* README.txt: mention soapval1.cl
+	* soapval1.cl: NEW FILE 
+	* xmp-base.cl (xmp-export-method): order of methods is order of exports
+	* xmp-base.cl (xmp-match-complex-tail): revise body to handle :or
+	* xmp-aserve.cl (xmp-enable-server): copy server instance
+
+	
+2003-07-30  Kevin Layer  <layer@crikey>
+
+	* (REMOVE) soap-client.htm: use html6 module one instead
+	* Makefile: get soap-client.htm from html6 module
+
+	* soap.cl: move defpatch first to be first
+
+2003-07-29  Kevin Layer  <layer@crikey>
+
+	* build.cl: further hackery needed to make the patch work.  The
+	  soapm and soapa files need a defpatch form, which is now
+	  automatically generated and compiled.
+
+2003-07-28  Kevin Layer  <layer@crikey>
+
+	* build.cl: fix for building: don't compile soap.fasl in an upper
+	  case lisp
+	* soap.cl: add defpatch; use require instead of load
+	* Makefile: add licensing hack
+
+2003-07-28    <layer@HOBART>
+
+	* Makefile: tweaks for windows
+
+2003-07-28  Kevin Layer  <layer@crikey>
+
+	* Makefile: use adcl instead of alisp8 to build
+
+2003-07-24  Kevin Layer  <layer@crikey>
+
+	* soap-client.htm: fix links
+	* README.txt: minor fixes
+	* xmp-base.cl: move require of :pxml up before the first package
+	  use, otherwise autoload tries to load it
+	* (NEW) Makefile
+
+2003-07-23  Kevin Layer  <layer@crikey>
+
+	* (NEW) soap-client.htm
+

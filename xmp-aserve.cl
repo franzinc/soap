@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-aserve.cl,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: xmp-aserve.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
 
 ;; Using AllegroServe as the transport layer.
 
@@ -71,10 +71,10 @@
    ;; Accessors
 
    ;; Generic functions
+   xmp-server-response 
    
-   ;; Methods
-
    ;; Ordinary functions
+   xmp-header-slot
    
    ))
 
@@ -82,17 +82,31 @@
   ((transport :initform :aserve)
    (host          :accessor xmp-destination-host :initform nil)
    (agent         :accessor xmp-destination-agent :initform nil)
-   (content-type  :accessor xmp-destination-content-type)
-   (http-protocol :accessor xmp-destination-http-protocol)
-   (method        :accessor xmp-destination-method)
-   (url           :accessor xmp-destination-url           :initarg :url)
+   (content-type  :accessor xmp-destination-content-type :initform nil)
+   (http-protocol :accessor xmp-destination-http-protocol :initform nil)
+   (method        :accessor xmp-destination-method :initform nil)
+   (url           :accessor xmp-destination-url    :initform nil :initarg :url)
    (name          :accessor xmp-server-name
 		  :initform (format 
 			     nil 
 			     "AllegroServe/~{~A.~A.~A~}(Allegro Common Lisp)"
 			     *aserve-version*))
    (parameters    :accessor xmp-server-parameters :initarg :parameters :initform nil)
+   (request       :accessor aserve-request :initform nil)
    ))
+
+(defmethod xmp-copy :around ((object xmp-aserve-connector) &key &allow-other-keys)
+  (let ((new (call-next-method)))
+    (setf (xmp-destination-host new) (xmp-destination-host object)
+	  (xmp-destination-agent new) (xmp-destination-agent object)
+	  (xmp-destination-content-type new) (xmp-destination-content-type object)
+	  (xmp-destination-http-protocol new) (xmp-destination-http-protocol object)
+	  (xmp-destination-method new) (xmp-destination-method object)
+	  (xmp-destination-url new) (xmp-destination-url object)
+	  (xmp-server-parameters new) (xmp-server-parameters object)
+	  )
+    new))
+
 
 
 (defclass xmp-aserve-client-connector  (xmp-aserve-connector xmp-client-connector)  ())
@@ -100,6 +114,13 @@
 (defclass xmp-aserve-server-connector  (xmp-aserve-connector xmp-server-connector)
   ((server    :accessor xmp-aserve-server :initform nil)
    ))
+
+(defmethod xmp-copy :around ((object xmp-aserve-server-connector) &key &allow-other-keys)
+  (let ((new (call-next-method)))
+    (setf (xmp-aserve-server new) (xmp-aserve-server object)
+	  )
+    new))
+
 
 (defclass xmp-aserve-string-out-connector 
   (xmp-aserve-connector xmp-string-out-connector) ())
@@ -269,12 +290,36 @@
 
 (defmethod xmp-enable-server :around ((server xmp-aserve-server-connector)
 				     &key &allow-other-keys)
+  (or (xmp-aserve-server server)
+      (setf (xmp-aserve-server server) net.aserve:*wserver*))
   (call-next-method)
   (apply #'publish     
 	 :server (xmp-aserve-server server)
 	 :function #'(lambda (request entity) 
-		       (xmp-server-implementation server (get-request-body request))
-		       (xmp-message-send server :request request :entity entity))
+		       (xmp-server-response server :request request :entity entity))
 	 :content-type "text/xml"
 	 (xmp-server-parameters server))
   server)
+
+(defmethod xmp-server-response ((server xmp-aserve-server-connector)
+				&key request entity options &allow-other-keys)
+  (let ((server
+	 (mp:with-process-lock
+	  ((xmp-server-lock server))
+	  ;; Make a copy of the server to allow multiple
+	  ;;     aserve worker threads
+	  (xmp-copy server))))
+    (setf (aserve-request server) request)
+    (apply 'xmp-server-implementation server (get-request-body request) options)
+    (xmp-message-send server :request request :entity entity)))
+
+(defun xmp-header-slot (request slot)
+
+  ;; aserve normalizes header names this way
+  (setf slot (read-from-string
+	      (concatenate 
+	       'string ":" (string-downcase (symbol-name slot)))))
+
+ (header-slot-value request slot))
+
+

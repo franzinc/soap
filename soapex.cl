@@ -16,7 +16,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapex.cl,v 1.1.1.1 2003/07/24 00:49:45 layer Exp $
+;; $Id: soapex.cl,v 1.2 2003/12/11 05:38:48 layer Exp $
 
 ;; SOAP client examples
 
@@ -26,10 +26,17 @@
 
 (defpackage :user (:use :net.xmp.soap)) 
 
+(defpackage :net.xmp.schema (:use) (:nicknames :xs :xsd))
+(defpackage :net.xmp.schema-instance (:use) (:nicknames :xsi))
+(defpackage :net.xmp.soap.none (:use) (:nicknames :none))
+(defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
+(defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
+
+
 
 (defun sp01 ()
 
-  ;;??? fails: "getCurrentTime" not defined
+  ;; Sometimes fails: "getCurrentTime" not defined (may be server problem).
 
   (let ((conn (soap-message-client 
 	       :url "http://time.soapware.org/currentTime"
@@ -62,7 +69,7 @@
 (defpackage :temp (:use) (:export "getTemp"))
 (defun sp10 (&optional (zip "98325"))
 
-  "http://www.xmethods.net/sd/2001/TemperatureService.wsdl"
+  ;; http://www.xmethods.net/sd/2001/TemperatureService.wsdl
 
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword
@@ -78,7 +85,7 @@
 				  :namespaces
 				  (nil (:temp "tns" "urn:xmethods-Temperature"))
 				  ))
-	:zipcode zip
+	:|zipcode| zip
 	))
       (list conn)))))
 
@@ -94,10 +101,6 @@
 			      "GetPlayers"
 			      ))
 (defun sp21 (&optional (encoding (list :utf8-base :utf-8)))
-
-  ;;??? still does not work
-  ;;  sending message nearly identical to sample on web
-  ;;  but returns an empty GetTeamsResponse element
 
   (let ((conn (soap-message-client 
 	       :url "http://webservices.empowered.com/statsws/stats.asmx"
@@ -124,7 +127,6 @@
 
 (defun sp22 (&optional (encoding (list :utf8-base :utf-8)))
 
-  ;;??? still does not work
   ;;  sending message nearly identical to sample on web
 
   (let ((conn (soap-message-client 
@@ -352,7 +354,7 @@
     :namespaces (nil (:gg "gg" "urn:GoogleSearch"))
     ))
 (define-soap-element nil 'gg:|doGoogleSearchResponse|
-  '(:complex (:seq (:element :return gg:|GoogleSearchResult|))))
+  '(:complex (:seq (:element "return" gg:|GoogleSearchResult|))))
 (define-soap-type nil 'gg:|GoogleSearchResult| '(:complex (:seq* (:any))))
 (define-soap-type nil 'gg:|ResultElement| '(:complex (:seq* (:any))))
 (define-soap-type nil 'gg:|DirectoryCategory| '(:complex (:seq* (:any))))
@@ -410,4 +412,45 @@
       (list conn)))))
 
 
+
+(define-soap-element nil "testServer"
+  '(:complex (:seq* (:any))
+	     :action "ACLSOAP"
+	     ))
+
+(defun simple-server (&key (port 4567)
+			   (server-action "ACLSOAP")
+			   (method-action :default)
+			   (client-action server-action) 
+			   )
+  (let ((host "localhost")
+	(path "/ACL-SOAP")
+	)
+    (let ((s (soap-message-server
+	      :start (list :port port) :enable :start
+	      :publish `(:path ,path)
+	      :action server-action
+	      :lisp-package :keyword
+	      )))
+
+      (soap-export-method s "testServer" (list :|a| :|b| :|c|)
+			  :lisp-name 'simple-server-1
+			  :action method-action
+			  :return '(:element "sResponse" xsd:|string|))
+      (sleep 1))
+    
+    (let ((c (soap-message-client :url (format nil "http://~A:~A~A"
+					       host port path)
+				  :lisp-package :keyword
+				  )))
+      (equal
+       '(:|sResponse| "123")
+       (call-soap-method c 
+			 `(:element "testServer"
+				    (:complex (:seq* (:any))
+					      :action ,client-action
+					      ))  
+			 "a" 1 "b" 2 "c" 3)))))
+
+(defun simple-server-1 (&key |a| |b| |c|) (concatenate 'string |a| |b| |c|))
 
