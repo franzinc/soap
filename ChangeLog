@@ -4,6 +4,11 @@ next join tag: use join2.sh
 *******************************************************************************
 
 2004-04-23    <mm@KETCHTOO>
+	
+	* xmp-soap.cl (soap-encode-parts): remove compiler warning
+
+
+2004-04-23    <mm@KETCHTOO>
 
 	* RELNOTES: add summary of changes
 	* xmp-wsdl.cl
@@ -155,4 +160,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.3 $
+$Revision: 2.4 $

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.3 2004/04/23 18:42:16 mm Exp $
+;; $Id: xmp-soap.cl,v 2.4 2004/04/23 21:48:33 mm Exp $
 
 ;; SOAP support
 
@@ -893,10 +893,10 @@
 (defmethod soap-encode-parts ((conn soap-connector)
 			      parts name type-def
 			      &aux
-			      type-class cdef type-res type-name res item-type
+			      type-class cdef type-res res item-type
 			      aparts elt pattern attr send pname ptype pattr parg)
   ;; return type of encoded part
-  (multiple-value-setq (type-res type-name) (soap-resolve-type conn type-def :out))
+  (setq type-res (soap-resolve-type conn type-def :out))
   (cond ((consp type-res)
 	 (setf type-class (first type-res)))
 	(t (setf type-class :simple type-res type-def)
