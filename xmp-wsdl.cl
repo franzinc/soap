@@ -1,4 +1,4 @@
-;; -*- mode: common-lisp; package: net.xmp -*-
+;; -*- mode: common-lisp; package: net.xmp.soap -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
 ;; copyright (c) 2003-2004 Franz Inc, Oakland, CA - All rights reserved.
@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.4 2004/04/23 22:07:05 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.5 2005/08/03 05:09:48 layer Exp $
 
 ;; WSDL support
 
@@ -27,13 +27,19 @@
 ;;;    applies to operation names     
 ;;; elements in message are not in any namespace
 
+;;; style=rpc  operation name is method name
+;;;            each part has name and type attrs, represents one parameter element
+;;;            use="encoded" encodingStyle="required"     .NET
+;;;                SOAPScope gives warning but still works
+;;;
+;;; style=document there should be only one part
+;;;            each part has name and element attrs, represents one Body element
+;;;            use="literal"
+
 (in-package :net.xmp.soap)
 
 (defpackage :net.xmp.soap 
   (:export 
-   #:*wsdl-default-namespaces*
-   #:*wsdl-1.1-namespaces*
-   #:*wsdl-1.2-namespaces*
    #:decode-wsdl-file
    #:decode-wsdl-string
    #:decode-wsdl-at-uri
@@ -43,10 +49,23 @@
    #:wsdl-service-names
    #:make-client-interface
    #:make-server-interface
-   #:*application-namespaces*
    #:describe-soap-method
    #:describe-soap-element
    #:describe-soap-type
+
+   #:*wsdl-debug*
+
+   #:wsdl-post-process
+   #:wsdl-props
+   #:wsdl-maybe-conflicts
+   #:wsdl-compose-name
+   #:writer-prefix
+   #:reader-prefix
+   #:soap-object-class
+   #:wsdl-file-connector
+   wsdl-object-classes
+   items
+
    ))
 
 (eval-when (compile load eval)
@@ -77,7 +96,6 @@
      #:|port|
      #:|name|
      #:|location|
-     #:|targetNamespace|
      #:|fault|
      ;; #:||
  
@@ -91,8 +109,18 @@
      #:|body|
      #:|address|
      #:|fault|
+     #:|header|
      ;; #:||
      ))
+
+  (defpackage :net.xmp.wsdl.mime
+    (:use))
+
+  (defpackage :net.xmp.wsdl.http
+    (:use))
+
+  (defpackage :net.xmp.wsdl.msstk
+    (:use))
 
   )
 
@@ -101,100 +129,142 @@
   (defpackage :net.xmp.wsdl.soap (:use) (:nicknames :wsoap))
   )
 
-(defparameter *wsdl-1.1-namespaces*
+(defvar *wsdl-debug* nil)
+
+(define-namespace :net.xmp.wsdl "wsdl" "http://schemas.xmlsoap.org/wsdl/")
+(xmp-define-namespace-map 
+ :wsdl1.1 t
+ (list
+  nil ;;; no default
   ;;
   ;; From: Web Services Description Language (WSDL) 1.1
   ;;       W3C Note 15 March 2001
   ;;       This version: http://www.w3.org/TR/2001/NOTE-wsdl-20010315
   ;;
-  '(nil
-    (:net.xmp.wsdl
-     "wsdl"
-     "http://schemas.xmlsoap.org/wsdl/"
-     ;; WSDL namespace for WSDL framework.
-     )
-    (:net.xmp.wsdl.soap
-     "soap"
-     "http://schemas.xmlsoap.org/wsdl/soap/"
-     ;; WSDL namespace for WSDL SOAP binding.
-     )
-    ;; http http://schemas.xmlsoap.org/wsdl/http/ 
-    ;;      WSDL namespace for WSDL HTTP GET & POST binding.
-    ;; mime http://schemas.xmlsoap.org/wsdl/mime/
-    ;;      WSDL namespace for WSDL MIME binding.
-    (:net.xmp.soap.encoding
-     "soapenc"
-     "http://schemas.xmlsoap.org/soap/encoding/"
-     ;; Encoding namespace as defined by SOAP 1.1 [8].
-     )
-    (:net.xmp.soap.envelope
-     "soapenv"
-     "http://schemas.xmlsoap.org/soap/envelope/"
-     ;; Envelope namespace as defined by SOAP 1.1 [8].
-     )
-    (:net.xmp.schema-instance
-     "xsi"
-     "http://www.w3.org/2000/10/XMLSchema-instance"
-     ;; Instance namespace as defined by XSD [10].
-     )
-    (:net.xmp.schema
-     "xsd"
-     "http://www.w3.org/2000/10/XMLSchema"
-     ;; Schema namespace as defined by XSD [10].
-     )
-    ;; tns (various)
-    ;; The 'this namespace' (tns) prefix is used as a convention
-    ;;     to refer to the current document.
-    ;; (other) (various)
-    ;; All other namespace prefixes are samples only. 
-    ;;     In particular, URIs starting with 'http:// example.com'
-    ;;     represent some application- dependent or context-dependent URI [4].
-    ))
 
-(defparameter *wsdl-1.2-namespaces*
+  '(:net.xmp.wsdl
+    "wsdl"
+    "http://schemas.xmlsoap.org/wsdl/"
+    ;; WSDL namespace for WSDL framework.
+    )
+  '(:net.xmp.wsdl.soap
+    "soap"
+    "http://schemas.xmlsoap.org/wsdl/soap/"
+    ;; WSDL namespace for WSDL SOAP binding.
+    )
+  ;; http http://schemas.xmlsoap.org/wsdl/http/ 
+  ;;      WSDL namespace for WSDL HTTP GET & POST binding.
+  '(:net.xmp.wsdl.http "http" "http://schemas.xmlsoap.org/wsdl/http/")
+
+  ;; mime http://schemas.xmlsoap.org/wsdl/mime/
+  ;;      WSDL namespace for WSDL MIME binding.
+  '(:net.xmp.wsdl.mime "mime" "http://schemas.xmlsoap.org/wsdl/mime/")
+    
+  :soap1
+
+  ;; tns (various)
+  ;; The 'this namespace' (tns) prefix is used as a convention
+  ;;     to refer to the current document.
+  ;; (other) (various)
+  ;; All other namespace prefixes are samples only. 
+  ;;     In particular, URIs starting with 'http:// example.com'
+  ;;     represent some application- dependent or context-dependent URI [4].
+  ))
+
+;;???(define-namespace :net.xmp.wsdl "wsdl" "http://www.w3.org/2003/06/wsdl")
+(xmp-define-namespace-map
+ :wsdl1.2 t
+ (list
+  nil
   ;;
   ;; From: Web Services Description Language (WSDL)
   ;;       Version 1.2 Part 1: Core Language
   ;;       W3C Working Draft 11 June 2003
   ;;       This version: http://www.w3.org/TR/2003/WD-wsdl12-20030611
   ;;
-  '(nil
-    (:net.xmp.wsdl
-     "wsdl"
-     "http://www.w3.org/2003/06/wsdl"
-     ;; A normative XML Schema [XML Schema: Structures], 
-     ;;   [XML Schema: Datatypes] document for the
-     ;;   "http://www.w3.org/2003/06/wsdl" namespace can be 
-     ;;   found at http://www.w3.org/2003/06/wsdl.
-     ;;   WSDL documents that do NOT conform to this schema are
-     ;;   not valid WSDL documents. WSDL documents that DO conform to
-     ;;   this schema and also conform to the other constraints defined
-     ;;   in this specification are valid WSDL documents.
-     )
-    (:net.xmp.wsdl.soap
-     "soap12"
-     "http://www.w3.org/2003/06/wsdl/soap12"
-     ;; Defined by WSDL 1.2: Bindings [WSDL 1.2 Bindings].
-     )
-    ;; http "http://www.w3.org/2003/06/wsdl/http"
-    ;; mime "http://www.w3.org/2003/06/wsdl/mime"
-    (:net.xmp.schema
-     "xs"
-     "http://www.w3.org/2001/XMLSchema"
-     ;; Defined in the W3C XML Schema specification
-     ;;   [XML Schema: Structures], [XML Schema: Datatypes].
-     )
-    (:net.xmp.schema-instance
-     "xsi"
-     "http://www.w3.org/2001/XMLSchema- instance"
-     )
-    ))
 
-(defparameter *wsdl-default-namespaces* *wsdl-1.1-namespaces*)
+  '(:net.xmp.wsdl
+    "wsdl"
+    "http://www.w3.org/2003/06/wsdl"
+    ;; A normative XML Schema [XML Schema: Structures], 
+    ;;   [XML Schema: Datatypes] document for the
+    ;;   "http://www.w3.org/2003/06/wsdl" namespace can be 
+    ;;   found at http://www.w3.org/2003/06/wsdl.
+    ;;   WSDL documents that do NOT conform to this schema are
+    ;;   not valid WSDL documents. WSDL documents that DO conform to
+    ;;   this schema and also conform to the other constraints defined
+    ;;   in this specification are valid WSDL documents.
+    )
+  '(:net.xmp.wsdl.soap
+    "soap12"
+    "http://www.w3.org/2003/06/wsdl/soap12"
+    ;; Defined by WSDL 1.2: Bindings [WSDL 1.2 Bindings].
+    )
+  ;; http "http://www.w3.org/2003/06/wsdl/http"
+  '(:net.xmp.wsdl.http "http" "http://www.w3.org/2003/06/wsdl/http")
+
+  ;; mime "http://www.w3.org/2003/06/wsdl/mime"
+  '(:net.xmp.wsdl.mime "mime" "http://www.w3.org/2003/06/wsdl/mime")
+    
+  :soap
+
+  ))
+
+(xmp-define-namespace-map
+ :wsdl-namespaces t
+ (list
+  nil
+  :wsdl1.2
+  :wsdl1.1
+  '(:net.xmp.wsdl.msstk
+    "stk"
+    "http://schemas.microsoft.com/soap-toolkit/wsdl-extension")
+  ))
+(xmp-define-namespace-map
+ :wsdl1-namespaces t
+ (list
+  nil
+  :wsdl1.1
+  :wsdl1.2
+  '(:net.xmp.wsdl.msstk
+    "stk"
+    "http://schemas.microsoft.com/soap-toolkit/wsdl-extension")
+  ))
+
+(xmp-define-namespace-map :wsdl-combine t
+			  '(nil :wsdl-namespaces :all (:wsdl-def "tns" :any)))
+(xmp-define-namespace-map :wsdl-keyword t
+			  '(nil :wsdl-namespaces :all (:keyword "tns" :any)))
+(xmp-define-namespace-map :wsdl-prefix  t
+			  '(nil :wsdl-namespaces :all ("wsdl-" "tns" :prefix)))
+(xmp-define-namespace-map :wsdl1-combine t
+			  '(nil :wsdl1-namespaces :all (:wsdl-def "tns" :any)))
+(xmp-define-namespace-map :wsdl1-keyword t
+			  '(nil :wsdl1-namespaces :all (:keyword "tns" :any)))
+(xmp-define-namespace-map :wsdl1-prefix  t
+			  '(nil :wsdl1-namespaces :all ("wsdl-" "tns" :prefix)))
+
+(defun wsdl-base-namespaces (argnse)
+  (if (and argnse (atom argnse))
+      argnse
+    (do ((tl argnse (cdr tl)) nsd (nse (list nil)))
+	((atom tl) (append nse (list :wsdl1-prefix)))
+      (etypecase (setf nsd (first tl))
+	(null nil)
+	(symbol (setf nse (append nse (list nsd))))
+	(cons (case (third nsd)
+		((:any :other :prefix)
+		 (return (append nse (list :wsdl1-namespaces nsd))))
+		(otherwise (setf nse (append nse (list nsd))))))))))
+
 
 (defclass wsdl-file-connector (schema-file-connector)
+
+  ;;NOTE: there is no xmp-copy method specialized on this class
+
   (
-   (message-dns     :initform *wsdl-default-namespaces*)
+   (message-dns     :initform nil)
+   (base-dns        :initform :wsdl1-namespaces)
    (trim-whitespace :initform t)
    (messages :accessor wsdl-messages :initform (list nil))
    (interfaces :accessor wsdl-interfaces :initform (list nil))
@@ -202,7 +272,16 @@
    (bindings :accessor wsdl-bindings :initform (list nil))
    (services :accessor wsdl-services :initform (list nil))
    
-   (client-options :accessor wsdl-client-options :initform nil)
+   (client-options :accessor wsdl-client-options
+		   ;; combined client options from make-wsdl-interface args
+		   ;; lisp-package null-element empty-element body-form
+		   ;; connect-class->:class
+		   :initform nil)
+
+   (wsdl-options   :accessor wsdl-options
+		   ;; a property list of additional options controlling
+		   ;; code generation and/or wsdl decoding
+		   :initform nil)
 
    (soap-style :accessor wsdl-soap-style :initform nil)
    (soap-address :accessor wsdl-soap-address :initform nil)
@@ -216,8 +295,41 @@
    (xml-leader    :initform "xml version=\"1.0\"")
    (wsdl-targets  :accessor wsdl-targets  :initform nil)
    (wsdl-warnings :accessor wsdl-warnings :initform nil)
+
+   (defined-elements :accessor wsdl-defined-elements :initform nil)
+   (defined-types    :accessor wsdl-defined-types    :initform nil)
+   (target-package   :accessor wsdl-target-package    :initform nil)
+   (counters         :accessor wsdl-counters         :initform nil)
+   (name-prefix      :accessor wsdl-name-prefix      :initform nil)
+   (file-package     :accessor wsdl-file-package     :initform :user)
+   (def-list         :reader wsdl-def-list :accessor wsdl-wdef-list
+                     ;; List of entries like (defining-form comment ... [symbol])
+                     ;;  If symbol is present in the list (at the end), it is the 
+                     ;;  name of the message handled by the defining form.
+                     :initform nil)
+   (sub-list         :accessor wsdl-sub-list
+		     ;; This list is always updated in tandem with the 
+		     ;; def-list slot, but it may be reset to nil intermittently
+		     ;; in order to collect intermediate results.
+		     :initform nil)
+   (def-index        :accessor wsdl-def-index  
+                     ;; An alist ((definer key ...) ...)
+                     :initform nil)
+   (map-name         :accessor wsdl-map-name         :initform nil)
+   (url-name         :accessor wsdl-url-name         :initform nil)
+   (maybe-conflicts  :accessor wsdl-maybe-conflicts  :initform :unknown)
+   (props            :accessor wsdl-props            :initform nil)
+   (compose-strategy :accessor wsdl-compose-strategy :initform nil)
+   (encoder-name     :accessor wsdl-encoder-name     :initform nil)
+   (object-classes   :accessor wsdl-object-classes
+		     ;; collect defclass names generated in wsdl-emit-object-classes
+		     :initform nil)
+   (overloaded-ops   :accessor wsdl-overloaded-ops   :initform nil)
    ))
 
+
+(defmethod wsdl-option ((conn wsdl-file-connector) name)
+  (getf (wsdl-options conn) name))
 
 (defmethod xmp-warning-leader ((conn wsdl-file-connector)) "WSDL")
 
@@ -228,25 +340,15 @@
 (defun decode-wsdl-at-uri (uri &rest keys)
   (apply #'decode-wsdl-source :uri uri keys))
 
-(defun decode-wsdl-source (&key file
-				(namespaces :guess)
+(defun decode-wsdl-source (&key file 
+				(namespaces :decode)
+				(base :wsdl1-prefix)
 				(lisp-package :keyword)
 				string uri
-				&aux (*xmp-warning-leader* "WSDL")
-				guess other-pk added-ns default
-				tail
-				)
+				&aux (*xmp-warning-leader* "WSDL"))
+  
 
-  ;; namespaces -> ns-tail | (default-uri-or-nil [ ns-spec ]... . ns-tail)
-  ;;    ns-spec -> package-name  ;; map all other URIs to this package
-  ;;            -> (:prefix symbol) ;; map all other URIs to packages 
-  ;;                                ;;     net.xmpns.symbolnn
-  ;;            -> (package-name prefix uri)   ;; explicit namespace def
-  ;;    ns-tail -> :none         ;; add nothing
-  ;;            -> :guess        ;; deduce namespaces from scan of XML
-  ;;            -> :wsdl-1.1     ;; *wsdl-1.1-namespaces*
-  ;;            -> :wsdl-1.2     ;; add *wsdl-1.2-namespaces*
-  ;;            -> nil           ;; add *wsdl-default-namespaces*
+  ;; namespaces -> :decode | namespace-map
 
   (when uri 
     (multiple-value-bind (body rc h ruri)
@@ -256,52 +358,29 @@
 	(error "URI ~A returned error ~S ~S ~S"
 	       uri rc h ruri))))
 
-  (let* ((dns (progn
-		(etypecase namespaces
-		  (null nil)
-		  ((member :guess) (setf guess namespaces))
-		  ((or string symbol) (setf guess t other-pk namespaces))
-		  (cons (setf default (car namespaces))
-			(do ((tl (cdr namespaces) (cdr tl)))
-			    ((atom tl)
-			     (ecase tl
-			       (:guess (setf guess t))
-			       (:wsdl-1.1 (setf tail *wsdl-1.1-namespaces*))
-			       (:wsdl-1.2 (setf tail *wsdl-1.2-namespaces*))
-			       ((nil)  (setf tail *wsdl-default-namespaces*))
-			       (:none nil)))
-			  (typecase (first tl)
-			    (atom (if other-pk
-				      (error "More than one other-package")
-				    (setf other-pk (first tl))))
-			    (cons (case (first (first tl))
-				    (:prefix
-				     (if other-pk
-					 (error "More than one other-package")
-				       (setf other-pk (first tl))))
-				    (otherwise
-				     (push (first tl) added-ns))))))))
-		(when guess
-		  (multiple-value-bind (ns other ambi missing)
-		      (decode-wsdl-namespaces
-		       :file file :string string :other-pk other-pk 
-		       :base-ns (xmp-merge-nses (cons default added-ns) tail))
-		    (if (and (null other) (null ambi) (null missing))
-			(setf tail ns)
-		      (return-from decode-wsdl-source
-			(values 
-			 nil
-			 (when other
-			   (cons "Unrecognized namespaces:" other))
-			 (when ambi
-			   (cons "Ambiguous URIs containing:" ambi))
-			 (when missing
-			   (cons "Missing namespaces:" missing))
-			 )))))
-		(xmp-merge-nses (cons default added-ns) tail)))
+  (let* ((base-dns (wsdl-base-namespaces base))
+	 (dns (case namespaces
+		(:decode
+		 (multiple-value-bind (ns other ambi missing)
+		     (decode-wsdl-namespaces
+		      :file file :string string :map base-dns)
+		   (if (and (null other) (null ambi) (null missing))
+		       ns
+		     (return-from decode-wsdl-source
+		       (values 
+			nil
+			(when other
+			  (cons "Unrecognized namespaces:" other))
+			(when ambi
+			  (cons "Ambiguous URIs containing:" ambi))
+			(when missing
+			  (cons "Missing namespaces:" missing))
+			)))))
+		(otherwise namespaces)))
 				   
 	 (conn (make-instance 'wsdl-file-connector
 			      :message-dns dns
+			      :base-dns base-dns
 			      :source file :lisp-package lisp-package)))
 
     (values-list
@@ -314,15 +393,15 @@
 
 (defmethod schema-decode-attribute ((conn wsdl-file-connector)
 				    name value nss &aux attr kwd)
-  (setf attr (xmp-decode-qualified-name conn name nss))
+  (setf attr name)
   (setf kwd (intern (string attr) :keyword))
   (case attr
-    ((wsdl:|message| wsdl:|arrayType| wsdl:|binding|)
-     (values attr (xmp-decode-qualified-name conn value nss)))
+    ((wsdl:|arrayType|)
+     (values attr (xmp-decode-qualified-name conn value nss :suppress-default t)))
     (otherwise 
      (case kwd
-       ((:binding) 
-	(values attr (xmp-decode-qualified-name conn value nss)))
+       ((:|binding| :|message| :|element|) 
+	(values attr (xmp-decode-qualified-name conn value nss :suppress-default t)))
        (otherwise
 	(call-next-method conn attr value nss))))))
 
@@ -356,20 +435,12 @@
   (declare (ignore options))
   (list :documentation data))
 
-(defmethod xmp-complex-content ((conn wsdl-file-connector) 
-				(elt (eql 'wsdl:|documentation|))
-				data &rest options &key &allow-other-keys)
-  (apply #'call-next-method conn elt data :warn nil options))
+(define-schema-default-part
+  wsdl-file-connector wsdl:|documentation| :documentation :cclass schema-text-component)
 
-(defmethod xmp-complex-content ((conn wsdl-file-connector) 
-				(elt (eql 'wsdl:|definitions|))
-				data &rest options &key &allow-other-keys)
-  (apply #'call-next-method conn elt data :warn nil options))
-  
-(defmethod xmp-complex-content ((conn wsdl-file-connector)
-				(elt (eql 'wsdl:|types|))
-				data &rest options &key &allow-other-keys)
-  (apply #'call-next-method conn elt data :warn nil options))
+(define-schema-default-part wsdl-file-connector wsdl:|definitions| :definitions)
+
+(define-schema-default-part wsdl-file-connector wsdl:|types| :types)
   
 
      
@@ -390,475 +461,756 @@
      (when found (pop (schema-target conn))))))
 
 
-(schema-collected-part wsdl-file-connector wsdl:|message|   :message   wsdl-messages)
-(schema-collected-part wsdl-file-connector wsdl:|interface| :interface wsdl-interfaces)
-(schema-collected-part wsdl-file-connector wsdl:|portType|  :port-type wsdl-port-types)
-(schema-collected-part wsdl-file-connector wsdl:|binding|   :binding   wsdl-bindings)
-(schema-collected-part wsdl-file-connector wsdl:|service|   :service   wsdl-services)
+(define-schema-collected-part
+  wsdl-file-connector wsdl:|message|   :message   wsdl-messages)
+(define-schema-collected-part
+  wsdl-file-connector wsdl:|interface| :interface wsdl-interfaces)
+(define-schema-collected-part
+  wsdl-file-connector wsdl:|portType|  :port-type wsdl-port-types)
+(define-schema-collected-part
+  wsdl-file-connector wsdl:|binding|   :binding   wsdl-bindings)
+(define-schema-collected-part
+  wsdl-file-connector wsdl:|service|   :service   wsdl-services)
 
-(schema-simple-part wsdl-file-connector wsdl:|input|      :input)
-(schema-simple-part wsdl-file-connector wsdl:|output|     :output)
-(schema-simple-part wsdl-file-connector wsoap:|binding|   :soap-binding)
-(schema-simple-part wsdl-file-connector wsoap:|operation| :soap-operation)
-(schema-simple-part wsdl-file-connector wsoap:|body|      :soap-body)
-(schema-simple-part wsdl-file-connector wsoap:|address|   :soap-address)
+(define-schema-collected-part
+  schema-file-connector wsdl::|import| :import   schema-imports)
+(define-schema-collected-part
+  schema-file-connector wsdl::|include| :include   schema-imports)
 
-(schema-named-part wsdl-file-connector wsdl:|operation|  :operation  :not-qname)
-(schema-named-part wsdl-file-connector wsdl:|part|       :part       :not-qname)
-(schema-named-part wsdl-file-connector wsdl:|port|       :port)
-(schema-named-part wsdl-file-connector wsdl:|fault|      :fault)
-(schema-named-part wsdl-file-connector wsoap:|fault|     :soap-fault)
+
+(define-schema-simple-part wsdl-file-connector wsdl:|input|      :input)
+(define-schema-simple-part wsdl-file-connector wsdl:|output|     :output)
+(define-schema-simple-part wsdl-file-connector wsoap:|binding|   :soap-binding)
+(define-schema-simple-part wsdl-file-connector wsoap:|operation| :soap-operation)
+(define-schema-simple-part wsdl-file-connector wsoap:|body|      :soap-body)
+(define-schema-simple-part wsdl-file-connector wsoap:|address|   :soap-address)
+(define-schema-simple-part wsdl-file-connector wsoap:|header|    :soap-header) ;;???
+
+(define-schema-named-part wsdl-file-connector wsdl:|operation|  :operation)
+(define-schema-named-part wsdl-file-connector wsdl:|part|       :part)
+(define-schema-named-part wsdl-file-connector wsdl:|port|       :port)
+(define-schema-named-part wsdl-file-connector wsdl:|fault|      :fault)
+(define-schema-named-part wsdl-file-connector wsoap:|fault|     :soap-fault)
+
+(define-schema-ignored-part wsdl-file-connector xsd:|annotation|)
+
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.mime::|multipartRelated|)
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.mime::|binding|)
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.mime::|mimeXml|)
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.mime::|content|)
+
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.http::|binding|)
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.http::|operation|)
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.http::|urlEncoded|)
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.http::|address|)
+
+(define-schema-ignored-part wsdl-file-connector net.xmp.wsdl.msstk::|binding|)
+
+;;; We also ignore any alements that are in application namespaces
+(defmethod net.xmp::schema-make-element ((conn wsdl-file-connector) elt &rest keys
+				&key tag &allow-other-keys)
+  (let ((pk (symbol-package elt)))
+    (cond ((or (eq pk (find-package :net.xmp.soap))
+	       (eq pk (find-package :net.xmp.wsdl))
+	       (eq pk (find-package :net.xmp.wsdl.soap)))
+	   (call-next-method))
+	  (tag (call-next-method))
+	  ((member elt (net.xmp::schema-ignored-messages conn)) (call-next-method))
+	  ((eq :ignored (schema-element-key
+			 (first (net.xmp::schema-component-stack conn))))
+	   (call-next-method))
+	  (t (apply #'call-next-method conn elt :tag :ignored keys)))))
+       
+
+
+
+
+;;; Allow some common errors:
+(define-schema-collected-part schema-file-connector
+  wsdl::|element|     :element      schema-elements)
+
 
 
 (defmethod wsdl-service-names ((conn wsdl-file-connector) &optional and-ports)
   (if and-ports
-      (let (services ports)
+      (let (services ports address)
 	(dolist (sdef (cdr (wsdl-services conn)))
-	  (dolist (spart (schema-collected-parts conn sdef :service))
-	    (case (first spart)
-	      (:port (push 
-		      (case and-ports
-			(:verbose
-			 (list (second spart)
-			       (xmp-getf conn 
-					 (getf (cddr spart) :attributes)
-					 "binding")
-			       (xmp-getf conn
-					 (cdr (assoc :soap-address
-						     (getf (cddr spart) :content)))		
-					 "location")))
-			(otherwise (second spart)))
-		      ports))))
-	  (push (cons (first sdef) (reverse ports)) services))
+	  (dolist (spart (schema-collected-parts sdef :service))
+	    (case (schema-element-key spart)
+	      (:port (when (setf address (schema-single-part spart :soap-address))
+		       (push 
+			(case and-ports
+			  (:verbose
+			   (list (schema-component-name spart)
+				 (schema-decoded-attribute spart "binding")
+				 (schema-decoded-attribute address "location")))
+			  (otherwise (schema-component-name spart)))
+			ports)))))
+	  (push (cons (schema-component-name sdef) (reverse ports)) services))
 	(reverse services))
-      (mapcar 'first (cdr (wsdl-services conn)))))
+      (mapcar 'schema-component-name (cdr (wsdl-services conn)))))
 
 
 (defmethod wsdl-define-content ((conn wsdl-file-connector) item)
-  (when (consp item)
-    (case (first item)
-      ((:set :seq :set1 :set+ :set* :seq1 :seq+ :seq*)
-       `(:complex
-	 (,(first item)
-	  ,@(mapcar
-	     #'(lambda (elt)
-		 (case (first elt)
-		   (:element
-		    `(:element ,(second elt)
-			       ,(getf (cddr elt) :type)))
-		   (:any `(:any))
-		   (otherwise
-		    (wsdl-warn conn
-			       "wsdl-define-type - unknown sub-form ~S"
-			       elt))))
-	     (cdr item)))))
-      )))
+  (schema-parts-to-type item :error-p nil))
 
-(defmethod wsdl-define-type ((conn wsdl-file-connector) typedef do-form)
-  (let* ((name (first typedef))
-	 (props (cdr typedef))
-	 x 
-	 complex content complex-content
-	 (simple  (case (setf x (getf props :simple-type :none))
-		    (:none nil)
-		    ((nil) :null)
-		    (otherwise x)
+(defmethod wsdl-parts-to-type ((conn wsdl-file-connector) msg &key options)
+  `(:complex
+    (:seq
+     ,@(mapcar #'(lambda (part 
+			  &aux 
+			  (name (schema-decoded-attribute part "name"))
+			  (type (schema-decoded-attribute part "type"))
+			  (elt  (schema-decoded-attribute part "element")))
+		   (cond 
+		    ((and name type (null elt)) `(:element (,name) ,type))
+		    ((and elt (null type))
+		     (if (schema-lookup-element conn elt)
+			 elt
+		       (error "cannot find message element def")))
+		    (t (error "strange message part"))
 		    ))
-	 new-def)
-    (cond ((null (setf complex (getf props :complex-type :none)))
-	   (setf new-def `(:complex (:seq* (:any)))))
+	       (schema-collected-parts msg :message :part)))
+    ,@options))
+
+
+(defmethod wsdl-define-element  ((conn wsdl-file-connector) edef &aux ctype)
+	    
+  ;; <element><complexType>...</complexType></element>
+  ;; edef -> (name :element ((:complex-type type-name-or-nil
+  ;;                            :complex-type (:content e-type-def))
+  ;;
+  ;; <element type=   />
+  ;;      -> (name :type type :attributes attrs)
+  ;;
+  ;; <element    />
+  ;;      -> (name :attributes attrs)            ANY content
+  ;; e-type-def (collector e-type-def-part ... )
+  ;; e-type-def-part -> (:element name :type type :attributes attrs
+  ;;                                   :content content)
+  ;;                 -> (:any . attributes)
+  (or (setf ctype (schema-parts-to-type edef :error-p nil))
+      (setf ctype (schema-decoded-attribute edef "type"))
+      (setf ctype (xmp-any-type conn)))
+  (wsdl-index-form conn
+		   `(define-soap-element nil
+		      ,(qt (schema-component-name edef))
+		      ,(qt ctype)
+		      ))
+  )
+
+(defmethod wsdl-define-type ((conn wsdl-file-connector) (typedef schema-component))
+  (let* ((name (schema-component-name typedef))
+	 x y z complex-content item
+	 (simple (case (schema-element-key typedef)
+		   (:simple-type (or (schema-component-content typedef) :null))))
+	 (complex (case (schema-element-key typedef)
+		    (:complex-type (or (schema-component-content typedef) :null))))
+	 (aopts (append
+		 (when (wsdl-option conn :send-atype)
+		   (list :send-atype t))
+		 (when (wsdl-option conn :send-asize)
+		   (list :send-asize t))))
+	 new-def err)
+    
+    (multiple-value-setq (new-def err)
+      (schema-parts-to-type typedef :conn conn :error-p nil))
+    
+    (cond (new-def)
+	  ((eq complex :null)
+	   (setf new-def (xmp-any-type conn)))
 	  ((consp complex)
 	   (cond
-	    ((setf complex-content (cdr (assoc :complex-content complex)))
-	     (case (first complex-content)
-	       (:attributes (pop complex-content) (pop complex-content)))
-	     (dolist (item complex-content)
-	       (case (first item)
+	    ((setf complex-content (schema-single-part typedef :complex-content))
+	     (or (when (setf item (schema-single-part complex-content :restriction))
+		  (let* ((r-base (schema-decoded-attribute item "base"))
+			 (r-attr (schema-single-part item :attribute))
+			 (r-atype (when r-attr
+				    (schema-decoded-attribute r-attr "arrayType")))
+			 
+			 )
 
-		 ;; (:extension wsdl:base base-type
-		 ;;             :content ((:content collected-parts)))
-		 ;; xmeth014 looks like extension slots are added to base slots
-		 ;;          need extension to :complex ???
+		    (when *wsdl-debug*
+		      (format
+		       t "~&wsdl-define-type: r-base=~S   r-attr=~S  r-atype=~S ~%"
+		       r-base r-attr r-atype))
 
-		 (:restriction
-		  (let* ((r (cdr item))
-			 (r-base (xmp-getf conn r "base"))
-			 (r-cont (getf r :content))
-			 (r-attr (assoc :attribute r-cont))
-			 (r-suba (getf r-attr :attributes))
-			 (r-atype (xmp-getf conn r-suba "arrayType")))
 		    (cond
 		     ((and (eq r-base 'enc:|Array|)
-			   (eq (second r-attr) 'enc:|arrayType|)
+			   r-attr
+			   (eq (schema-component-name r-attr) 'enc:|arrayType|)
 			   r-atype)
 		      (setf new-def
-			    `(:array ,(soap-parse-array-type conn r-atype :dns))))
+			    `(:array ,(soap-parse-array-type conn r-atype :dns) ,@aopts))
+		      t)
 
-		     ;; complex-content -> ((:restriction wsdl:base SOAP-ENC:Array
-		     ;;                         :content
-		     ;;                         ((:content collector-list))))
+
+		     ;;     <restriction base="soapenc:Array">
+		     ;;        <sequence>
+		     ;;          <element minOccurs="0" maxOccurs="unbounded"   ???
+		     ;;             name="String" type="s:string" /> 
+		     ;;       </sequence></restriction>
+		     ;;
+		     ;; in xmethods.com InterFAX FAX Web Service 
+		     ((and (eq r-base 'enc:|Array|)
+			   (setf r-atype (schema-parts-to-type item :error-p nil)))
+		      (setf new-def `(:array ,r-atype ,@aopts))
+		      t)
+
+		     ;;   <restriction wsdl:base SOAP-ENC:Array>
+		     ;;     <element or type/>
+		     ;;     </restriction>
+		     ;;
 		     ;; in xmethods "Muse.Net Client Service"
-		     ((and (setf x (assoc :content r-cont))
-			   (eql 2 (length x))
-			   (setf x (wsdl-define-content conn (second x))))
-		      (setf new-def `(:array ,x)))
+		     ((and (setf x (schema-component-content item))
+			   (eql 1 (length x))
+			   (setf x (schema-parts-to-type (first x) :error-p nil)))
+		      (setf new-def `(:array ,x ,@aopts))
+		      t)
 
 		     (t 
 		      (wsdl-warn
 		       conn
-		       "wsdl-define-type - unknown restriction in complex-content~S"
-		       complex-content)))))
-		 (otherwise
-		  (wsdl-warn conn
-			     "wsdl-define-type - unknown item in complex-content ~S"
-			     complex-content))
-		 ))
-	     )
-	    ((setf content (cdr (assoc :content complex)))
-	     (setf x nil)
-	     (dolist (item content)
-	       (when (setf new-def (wsdl-define-content conn item))
-		 (return))
-	       (or x  ;; warn only once
-		   (wsdl-warn
-		    conn "wsdl-define-type - unknown content in ~S" content))
-	       (setf x t)))
+		       "wsdl-define-type - unknown restriction in complex-content ~S"
+		       complex-content)
+		      t))))
 
-	    ;; complex -> ((:element ...) ...)
+		 (when (setf item (schema-single-part complex-content :extension))
+		   (let* ((e-base (schema-decoded-attribute item "base"))
+			  (e-parts (schema-component-content item))
+			  )
+		     (cond ((and e-base 
+				 (dolist (p e-parts t)
+				   (case (schema-element-key p)
+				     ((:attribute) nil)
+				     (otherwise (return nil)))))
+			    (setf new-def `(:simple ,e-base))
+			    t)
+			   (t 
+			    (wsdl-warn
+			     conn
+			     "wsdl-define-type - unknown extension in ~S with parts ~S"
+			     complex-content e-parts)
+			    t)
+			   )))
+	     
+		 (wsdl-warn
+		  conn
+		  "wsdl-define-type - unknown item(s) in complex-content ~{~S~} of ~S"
+		  (schema-component-content complex-content) typedef)))
+	    
+	    ;;<complexType><element.../>... </complexType>
+	    ;;
 	    ;;   in xmethods "Xara NavBar Generator"
-	    ((dolist (x complex t)
-	       (or (and (consp x) (eq :element (first x)))
-		   (return nil)))
+	    ((setf x (schema-collected-parts typedef :complex-type :element))
 	     (setf new-def
 		   `(:complex (:seq1 ,@(mapcar
 					#'(lambda (e)
 					    `(:element
-					      ,(string (second e))
+					      ,(string (schema-component-name e))
 					      (:simple
-					       ,(xmp-getf conn (cddr e) "type"))))
-					complex)))))
+					       ,(schema-decoded-attribute e "type"))))
+					x)))))
 		
-	    ;; complex -> ((#("element" "type" type "maxOccurs" max)))
+	    ;; <complexType><element type="" maxOccurs=n/></complexType>
 	    ;; apparently sloppy def in xmethods "Agni Find MP3"
-	    ((and (null (cdr complex))
-		  (consp (setf complex (first complex)))
-		  (null (cdr complex))
-		  (setf complex (concatenate 'list (first complex)))
-		  (equal "element" (string (first complex))))
+	    ((and (null (cdr complex)) 
+		  (setf x (first complex))
+		  (null (schema-component-content x))
+		  (equal "element" (string (schema-element-tag x))))
 	     (setf new-def
-		   `(:array ,(if (setf x (xmp-getf conn (cdr complex) "type"))
-				 (xmp-decode-qualified-name conn x :dns)
-			       (list :any)))))
+		   `(:array ,(or (setf y (schema-decoded-attribute x "type"))
+				 (list :any))
+			    ,@aopts)))
 
-	    ;; complex -> (:simple :content
-	    ;;              ((:extension wsdl:base type :content attributes-def)))
-	    ;;   in xmethods "Alan Bush Compositions"
-	    ((and (eq :simple (first complex))
-		  (setf content (getf (cdr complex) :content))
-		  (setf x (assoc :extension content)))
-	     (setf new-def `(:simple ,(xmp-getf conn (cdr x) "base"))))
+	    ((and (setf x (schema-single-part typedef :simple-content))
+		  (setf y (schema-single-part x :extension))
+		  (setf z (schema-decoded-attribute y "base"))
+		  )
+	     (setf new-def `(:simple ,z)))
 
-	    (t (wsdl-warn conn "wsdl-define-type - unknown complex type ~S"
-			  complex))
+	    ((schema-single-part typedef :attribute :error-p nil :more-p t)
+	     ;; ignored ???
+	     nil)
+
+	    (t (wsdl-warn conn "wsdl-define-type - unknown complex type parts ~S in ~S"
+			  complex typedef))
 	    ))
 
-	  ((null (setf simple (getf props :simple-type :none)))
+	  ((eq simple :null)
 	   (setf new-def `(:simple xsd:|string|)))
 	  ((consp simple)
 	   (or
-	    (let* ((r (cdr (assoc :restriction simple)))
-		   (base (when r (xmp-getf conn r "base"))))
+	    (let* ((r (schema-single-part typedef :restriction))
+		   (base (when r (schema-decoded-attribute r "base"))))
 	      (when base
 
-		;; look for :content ((:enumeration "value" val) ...)
+		;; look for parts <enumeration "value" val> 
 		;;   and collect values  - need extension to :simple ???
+		;; look for part <maxLength value=n/>   ???
 
 		(setf new-def `(:simple ,base))
 		t))
+	    (let* ((sp (schema-single-part typedef :simple-content))
+		   (ex (when sp (schema-single-part sp :extension)))
+		   (base (when ex (schema-decoded-attribute ex "base")))
+		   )
+	      (when base (setf new-def `(:simple ,base)) t))
 	    (wsdl-warn conn "wsdl-define-type - unknown simple type ~S"
 		       simple)))
 
 
-	  (t (wsdl-warn conn "wsdl-define-type - unknown form ~S" typedef)))
-    (when new-def (funcall do-form `(define-soap-type nil ',name ',new-def)))
+	  (t (wsdl-warn
+	      conn "wsdl-define-type - unknown form ~S err was ~A" typedef err)))
+    (when new-def
+      (wsdl-index-form conn `(define-soap-type nil ,(qt name) ,(qt new-def))))
       
     ))
 
-(defmethod wsdl-message-part-element ((conn wsdl-file-connector) part)
-  (or (getf (cddr part) :element)
-      (xmp-getf conn
-		(getf (cddr part) :attributes)
-		"element")
-      (second part)))
+(defun qt (val)
+  (typecase val
+    (number val)
+    (string val)
+    (keyword val)
+    (otherwise (list 'quote val))))
 
-(defmethod wsdl-bind-operation ((conn wsdl-file-connector) b mode do-form 
-				eval prefix suffix)
-  (flet ((do-form (&rest x) (apply do-form x))
-	 (part-name (part) (wsdl-message-part-element conn part))
+(defun maybe-second (form) 
+  (cond ((consp form)
+	 (if (eq 'quote (first form))
+	     (second form)
+	   (error "Not a qoted value ~S" form)))
+	((constantp form) form)
+	(t (error "Not a constant ~S" form))))
+	 
+
+(defmethod wsdl-resolve-type ((conn wsdl-file-connector) type &aux def name)
+  ;; returns nil  or  type-def and outermost name of def
+  (loop
+   (setf def (if (consp type)
+		 type
+	       (when type
+		 (or name (setf name type))
+		 (or (wsdl-lookup conn :type type nil)
+		     (soap-find-type conn type :dns)))))
+   (cond ((null def) (return nil))
+	 (t  (or (ecase (first def)
+		   (:simple (when (second def)
+			      (setf type (second def))
+			      (or name (setf name (second def)))))
+		   (:array nil)
+		   (:complex nil))
+		 (return (values def name type)))))))
+      
+
+(defmethod wsdl-lookup ((conn wsdl-file-connector) kind name recursive)
+  ;; returnd 2 values: v1 v2
+  ;; kind -> :element | :type 
+  ;; recursive -> nil | t | :any            v1=type def     v2=defining form
+  ;;           -> :complex        
+  ;;                  if def is :complex    v1=type def     v2=defining form
+  ;;                  if def is other       v1=nil          v2=defining form
+  ;;                  if def is named, follow name chain
+  (flet ((lookup (conn name recursive d &aux tp v1 v2) 
+		 (when (xmp-match-name conn  (maybe-second (third d)) name)
+		   (when (setf tp (maybe-second (fourth d)))
+		     (cond ((null recursive) (setf v1 tp v2 d))
+			   ((case recursive ((t :any) t)) (setf v1 tp v2 d))
+			   ((consp tp)
+			    (if (eq recursive (first tp))
+				(setf v1 tp v2 d)
+			      (setf v1 nil v2 d)))
+			   (t (multiple-value-bind (t2 d2)
+				  (wsdl-lookup conn :type tp recursive)
+				(cond (t2 (setf v1 t2 v2 d2))
+				      (d2 (setf v1 nil v2 d2))
+				      (t (setf v1 nil v2 d)))))))
+		   (return-from wsdl-lookup (values v1 v2)))))
+    (dolist (d (wsdl-def-list conn))
+      (case (first (setf d (first d)))
+	(define-soap-element (case kind (:element (lookup conn name recursive d))))
+	(define-soap-type    (case kind (:type    (lookup conn name recursive d))))
+	))))
+		   
+(defmethod wsdl-message-part-element ((conn wsdl-file-connector) part)
+  (or (schema-decoded-attribute part "element")
+      (schema-component-name part)))
+
+(defmethod wsdl-do-element
+  (conn style method-name action intern-name bind msg parts
+	&aux
+	(soap-body (schema-single-part bind :soap-body))
+	(estyle (if soap-body
+		    (schema-decoded-attribute
+		     soap-body "encodingStyle")
+		  (error "Cannot find wsdl-soap:body element")))
+			   
+	;;??? This seems to be use-less?
+	;;(use    (schema-decoded-attribute soap-body "use"))
+			   
+	(ns     (schema-decoded-attribute soap-body "namespace"))
+	(pk (when ns (net.xmp::xmp-uri-to-package
+		      conn ns :dns)))
+	(pktag "tns")
+	def-tail tail-props msg-type part-type elt def)
+
+  (or pk
+      (when (null ns)
+	(let* ((tg (wsdl-targets conn)) pk2)
+
+	  ;; Look in the list of all targetNamespace attributes
+	  ;; in the definition.
+
+	  (cond
+	   ;; If there is only one targetNamespace
+	   ;;    and it has a package, make these two the same
+	   ((and (eql 1 (length tg))
+		 (setf pk2 (net.xmp::xmp-uri-to-package
+			    conn (first tg) :dns)))
+	    (setf pk pk2)))))			   
+      (when ns (pushnew ns (wsdl-undef-ns conn) :test #'string=)))
+  (setf def-tail
+	`(,@(when ns
+	      `(:namespaces
+		(nil (,(when pk (intern (package-name pk) :keyword))
+		      ,pktag
+		      ,ns))))
+	    ,@(when estyle `(:encoding ,estyle))
+	    ,@(when action `(:action ,action))
+	    ))
+  (setf tail-props (append (when ns (list :namespaces))
+			   (when estyle (list :encoding))
+			   (when action (list :action))))
+  (when intern-name
+    (setf method-name (etypecase method-name
+			(symbol method-name)
+			(string (if pk
+				    (intern method-name pk)
+				  method-name)))))
+
+  (values
+   (cond
+    ((string-equal style "rpc")
+     ;; Operation name is method name, each part is a parameter
+     ;; SOAP method call and response are always structs.
+
+     (let ((mname method-name)
+	   (mtype (wsdl-parts-to-type conn msg :options def-tail)))
+       (if (wsdl-lookup conn :element method-name nil)
+	   (let ((i 1)
+		 (pk (when (symbolp method-name) (symbol-package method-name)))
+		 mn)
+	     ;; This element was already defined once - this is an
+	     ;; overloaded operation.  We need to define a new type
+	     ;; name for the overloaded operations.
+	     (loop (setf mn (format nil "~A_~A" method-name i))
+		   (when pk (setf mn (intern mn pk)))
+		   (if (wsdl-lookup conn :type mn nil)
+		       (incf i)
+		     (return (setf method-name mn))))
+	     (push method-name (wsdl-overloaded-ops conn))
+	     `(define-soap-type nil ,(qt method-name)
+		'(:complex (:seq (:element ,mname ,mtype)) ,@def-tail))
+	     )
+
+	 `(define-soap-element nil ,(qt method-name) ,(qt mtype)))
+       ))
+
+    ((string-equal style "document")
+
+     ;; Operation name is the element in the part
+     ;;  and it was already defined in the schema.
+
+     (setf elt (schema-decoded-attribute (first parts) "element"))
+     (if (eq :doc intern-name)
+	 (setf method-name elt)
+       (setf method-name (string elt)))
+
+     ;; We need to update the :namespaces option in the def
+     ;;    def is in list of forms to be evaluated...
+
+     ;; usual document  style part has the form
+     ;;   <part name="xxx" element="defined-element" />
+     (multiple-value-setq (msg-type def)
+       (wsdl-lookup conn :element method-name :complex))
+
+     ;; 14-Jan-05  mm: sometimes document style part has the form
+     ;;     <part element="ignored-name" type="defined-type" />
+     (or msg-type def
+	 (let ()
+	   (setf part-type (schema-decoded-attribute (first parts) "type"))
+	   (when part-type
+	     (multiple-value-setq (msg-type def)
+	       (wsdl-lookup conn :type part-type :complex)))))
+	     
+     (flet ((update (props place tail)
+		    (dolist (p props (nconc place tail))
+		      (when (getf (cddr place) p)
+			(error "Multiple definitions of ~S on ~S" p method-name)))))
+       (cond (msg-type (update tail-props msg-type def-tail))
+	     (def (cond ((consp (maybe-second (fourth def)))
+			 (update tail-props (maybe-second (fourth def)) def-tail)
+			 (setf msg-type (maybe-second (fourth def))))
+			(t (setf (fourth def)
+				 (list 'quote
+				       (list* :simple (maybe-second (fourth def))
+					      def-tail)))
+			   (setf msg-type (maybe-second (fourth def))))))
+	     (t (error "Cannot determine message type"))))
+     nil)
+    (t (error "Unknown message format."))
+    )
+
+   method-name msg-type))
+
+(defmethod wsdl-bind-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
+  (declare (ignore eval))
+  (flet ((part-name (part) (wsdl-message-part-element conn part))
 	 )
-    (let* ((op-name (second b))
-	   (body (cddr b))
-	   (content  (getf body :content))
-	   (soap-op  (assoc :soap-operation content))
-	   (action   (xmp-getf conn (cdr soap-op) "soapAction"))
-	   (style    (or (xmp-getf conn (cdr soap-op) "style")
+    (let* ((op-name (schema-component-name b))
+	   (soap-op  (schema-single-part b :soap-operation))
+	   (action   (schema-raw-attribute soap-op "soapAction"))
+	   (style    (or (schema-raw-attribute soap-op "style")
 			 (wsdl-soap-style conn)))
 	   (messages (cdr (wsdl-messages conn)))
+	   (bind-in (schema-single-part b :input))
+	   (bind-out (schema-single-part b :output))
 
-	   (bind-in  (assoc :input content))
-	   (bind-out (assoc :output content))
-	   ;;   (in-or-out :content ((:soap-body
-	   ;;                            wsdl:use encoded|literal
-	   ;;                            wsdl:namespace     URIstring
-	   ;;                            wsdl:encodingStyle URIstring
-	   ;;                            wsdl:parts  nmtokens          ???
-	   ;;                            )
+	   ;; <binding>
+	   ;;  <in-or-out> <:soap-body
+	   ;;                     wsdl:use= encoded|literal
+	   ;;                     wsdl:namespace= URIstring
+	   ;;                     wsdl:encodingStyle= URIstring
+	   ;;                     wsdl:parts=  nmtokens          ???
+	   ;;                     />
 	   ;;        soap:header  ???
 	   ;;        soap:fault   ???
+	   ;;    </in-or-out> </binding>
 
-	   (opdef    (first (member op-name (wsdl-operations conn)
-				    :test #'equal
-				    :key #'second)))
-	   (opcont   (getf opdef :content))
-	   (op-in    (assoc :input opcont))
-	   (in-msg-name   (xmp-getf conn (cdr op-in) "message"))
-	   (op-out   (assoc :output opcont))
-	   (out-msg-name  (xmp-getf conn (cdr op-out) "message"))
-	   (in-msg (assoc in-msg-name messages))
+	   (opdefs   (let (all)
+		       (dolist (op (wsdl-operations conn) all)
+			 (when (equal op-name (schema-component-name op))
+			   (push op all)))))
+
+	   (opdef  (cond ((null opdefs) (error "Cannot find operation ~A" op-name))
+			 ((null (cdr opdefs)) (first opdefs))
+			 (t
+			  ;; more than one operation - overloaded op name
+			  ;; find the one with matching input or output
+			  (or
+			  (cond (bind-in
+				 (dolist (op opdefs)
+				   (let ((op-in (schema-single-part op :input)))
+				     (and op-in
+					  (equal (schema-component-name bind-in)
+						 (schema-component-name op-in))
+					  (return op)))))
+				(bind-out
+				 (dolist (op opdefs)
+				   (let ((op-out (schema-single-part op :output)))
+				     (and op-out
+					  (equal (schema-component-name bind-out)
+						 (schema-component-name op-out))
+					  (return op))))))
+			  (error "Cannot find overloaded operation ~A" op-name)))))
+	   (op-in    (schema-single-part opdef :input))
+	   (in-msg-name   (when op-in (schema-decoded-attribute op-in "message")))
+	   (op-out   (schema-single-part opdef :output))
+	   (out-msg-name  (when op-out (schema-decoded-attribute op-out "message")))
+	   (in-msg (when in-msg-name
+		     (schema-collected-component
+		      conn #'wsdl-messages #'schema-component-name in-msg-name)))
 	   (in-parts (when in-msg
-		       (schema-collected-parts conn in-msg :message :key :part)))
-	   (out-msg (assoc out-msg-name messages))
+		       (schema-collected-parts in-msg :message :part)))
+	   (out-msg (when out-msg-name
+		      (schema-collected-component
+		       conn #'wsdl-messages #'schema-component-name out-msg-name)))
 	   (out-parts (when out-msg
-			(schema-collected-parts conn out-msg :message :key :part)))
+			(schema-collected-parts out-msg :message :part)))
 	   (cx (when in-msg (position in-msg messages)))
-	   comment done-form)
+	   comment done-form doc-type doc-ret ret-name)
 
-      (or (string-equal style "rpc")
-	  (error "SOAP style=~S is not implemented." style) ;;;???
-	  )
+      (when *wsdl-debug*
+	(format t "~&;WSDL op=~S  in-msg=~S ~S  out-msg=~S ~S~%" 
+		op-name in-msg-name (when in-msg (length in-parts)) 
+		out-msg-name (when out-msg (length out-parts))))
 
-      (flet ((do-element
-	      (method-name msg-name action binding intern-name
-			   &aux
-			   (parts (schema-collected-parts
-				   conn (assoc msg-name messages) :message :key :part))
-			   (content (getf (cdr binding) :content))
-			   (soap-body (assoc :soap-body content))
-			   (estyle (xmp-getf conn (cdr soap-body) "encodingStyle"))
-			   (use (xmp-getf conn (cdr soap-body) "use"))
-			   (ns (xmp-getf conn (cdr soap-body) "namespace"))
-			   (pk (when ns (net.xmp::xmp-uri-to-package
-					 conn ns :dns)))
-			   (pktag "tns"))
-	      (or (null use) (string-equal use "encoded")
-		  (error "SOAP use=~S is not implemented." use) ;;;???
-		  )
-	      (when ns
-		(or pk
-		    (let* ((mp (wsdl-undef-ns conn))
-			   (mpc (and (consp mp)
-				     (eq :if-missing-package (first mp))
-				     (second mp)))
-			   (made (when mpc (cddr mp)))
-			   nsp pkn nsd)
-		      (when mpc
-			(typecase mpc
-			  ((or string symbol)
-			   (setf nsp (string
-				      (read-from-string
-				       (format nil ":~A~A"
-					       mpc (1+ (length made))))))
-			   (setf pkn (string
-				      (read-from-string
-				       (format nil ":net.xmpns.~A" nsp))))
-			   (setf nsd (make-nsd pkn nsp ns))
-			   (push nsd (cddr mp))
-			   (setf pktag nsp)
-			   (setf pk (or (find-package pkn)
-					(make-package pkn :use nil)))
-			   (xmp-add-dns-entry conn nsd)
-			   t))))
-
-
-		    (let* ((tg (wsdl-targets conn)) pk2)
-
-		      ;; Look in the list of all targetNamespace attributes
-		      ;; in the definition.
-
-		      (cond
-		       ;; If there is only one targetNamespace
-		       ;;    and it has a package, make these two the same
-		       ((and (eql 1 (length tg))
-			     (setf pk2 (net.xmp::xmp-uri-to-package
-					conn (first tg) :dns)))
-			(setf pk pk2))))			   
-		    (pushnew ns (wsdl-undef-ns conn) :test #'string=)))
-
-	      ;; part -> (:part name [:type type] [:attributes attrs] [:content content])
-	      (values
-	       (let (type elt attrs
-			  (def-tail
-			    `(,@(when ns
-				  `(:namespaces
-				    (nil (,(when pk (intern (package-name pk) :keyword))
-					  ,pktag
-					  ,ns))))
-				,@(when estyle `(:encoding ,estyle))
-				,@(when action `(:action ,action))
-				))
-			  )
-		 ;; SOAP method call and response are always structs.
-		 `(define-soap-element
-		    nil
-		    ',(if intern-name
-			  (setf method-name (etypecase method-name
-					      (symbol method-name)
-					      (string (if pk
-							  (intern method-name pk)
-							method-name))))
-			method-name)
-		    '(:complex
-		      (:seq1    
-		       ,@(mapcar #'(lambda (part)
-				     (setf type (getf (cddr part) :type))
-				     (setf attrs (getf (cddr part) :attributes))
-				     (setf elt (xmp-getf conn attrs "element"))
-				     (cond ((and elt (null type))
-					    elt)
-					   ((and elt type)
-					    `(:element ,elt ,type))
-					   (t `(:element ,(second part)
-							 ,type))))
-				 parts))
-		      ,@def-tail)))
-	       method-name)))
+      (let (op-rename)
 	(when in-msg
-	  (multiple-value-setq (done-form op-name)
-	    (do-element op-name in-msg-name action bind-in t))
-	  (do-form done-form))
+	  (multiple-value-setq (done-form op-rename doc-type)
+	    (wsdl-do-element conn style op-name action
+			     (if (and (string-equal style "document")
+				      (eql 1 (length in-parts)))
+				 :doc
+			       t)
+			     bind-in in-msg in-parts))
+	  (when done-form (wsdl-index-form conn done-form)))
 	(when out-msg
-	  (do-form (do-element (concatenate 'string (string op-name) "Response")
-			       out-msg-name nil bind-out nil)))
+	  (multiple-value-setq (done-form ret-name doc-ret)
+	    (wsdl-do-element
+	     conn style (concatenate 'string (string op-rename) "Response")
+	     nil nil bind-out out-msg out-parts))
+	  (when done-form (wsdl-index-form conn done-form)))
 	(when (and in-msg out-msg);;???  in-out messages notification messages...
-	  (do-form
-	   (let* ((def-name (read-from-string (format nil "~A~A"
-						      prefix
-						      (case suffix
-							(:index (incf cx))
-							(:message op-name)))))
+	  (wsdl-index-form
+	   conn
+	   (let* ((def-name (wsdl-compose-name conn nil prefix (ecase suffix
+								 (:index (incf cx))
+								 (:message op-rename))))
 		  (one-part (and in-parts
 				 (null (cdr in-parts))
 				 (first in-parts)))
-		  (one-type (getf (cddr one-part) :type))
-		  (one-def  (and one-type 
-				 (wsdl-expand-singleton conn)
-				 eval
-				 (setf one-type (soap-find-type nil one-type :dns))
+		  (one-type (when one-part
+			      (or
+			       (and (string-equal style "rpc")
+				    (schema-decoded-attribute one-part "type"))
+			       (and (string-equal style "document")
+				    doc-type))))
+		  (one-def  (and one-type
+				 (cond
+				  ((string-equal style "document")
+				   (setf one-type doc-type))
+				  ((wsdl-expand-singleton conn)
+				   (and
+				    (setf one-type
+					  (schema-lookup-type conn	one-type))
+				    (setf one-type
+					  (schema-parts-to-type
+					   one-type :error-p nil)))))
 				 (eq :complex (first one-type))
 				 (case (first (second one-type))
-				   ((:seq :seq1 :set :set1) one-type)
+				   ((:seq* :seq :seq1 :set :set1) one-type)
 				   (otherwise nil))))
-		  (in-elts (mapcar #'part-name in-parts))
-		  (in-keys (mapcar #'(lambda (part) (do-form part :preserve))
-				   in-elts))
-		  (key-args   (if one-def
-				  (mapcar #'(lambda (part)
-					      (do-form (xmp-pick-name nil part)
-						       :preserve))
+		  (in-elts    (if one-def
+				  (mapcar #'(lambda (p) (xmp-pick-name nil p))
 					  (cdr (second  one-def)))
-				in-keys)
-			      )
+				(mapcar #'part-name in-parts)))
+		  (key-args   (mapcar #'(lambda (part)
+					  (wsdl-intern-name conn (string part)))
+				      in-elts))
+		  (arglist (mapcan #'(lambda (elt arg) (list (string elt) arg))
+				   in-elts key-args))
 		  )
+	     (or (string-equal style "document")
+		 (equal op-name op-rename)
+		 ;; if we have an overloaded rpc message name, we need
+		 ;;  to access through a defined type
+		 (setf arglist `(,(qt op-name) (list ,@arglist))))
 	     (ecase mode
 	       (:client
 		(setf comment
 		      (list (format nil "Send client message ~A " op-name)
 			    op-name))
 		`(defun ,def-name 
-		   (&rest ,(do-form "args") &key ,@key-args)
-		   (declare (ignore ,@key-args))
-		   (let ((,(do-form "conn") (soap-message-client 
-					     :url ,(wsdl-soap-address conn)
-					     :message-dns *application-namespaces*
-					     ,@(wsdl-client-options conn)
-					     )))
-		     (values
-		      ,(if one-def
-			   `(apply 'call-soap-method ,(do-form "conn")
-				   ',op-name 
-				   ,(part-name one-part)
-				   ,(do-form "args") nil)
-			 `(apply 'call-soap-method
-				 ,(do-form "conn") ',op-name ,(do-form "args")))
-		      ,(do-form "conn")))))
+		   (&key ,@key-args)
+		   (let ((,(wsdl-intern-name conn "conn")
+			  (soap-message-client 
+			   :url ,(wsdl-url-name conn)
+			   :message-dns ,(qt (wsdl-map-name conn))
+			   ,@(wsdl-client-options conn)
+			   )))
+		     (multiple-value-call
+		      #'values
+		      ,(if (and one-def (not (string-equal style "document")))
+			   `(call-soap-method ,(wsdl-intern-name conn "conn")
+					      ,(qt op-rename)
+					      ,(string (part-name one-part))
+					      (list ,@arglist))
+			 `(call-soap-method
+			   ,(wsdl-intern-name conn "conn")
+			   ,(qt op-rename)
+			   ,@arglist))
+		      ,(wsdl-intern-name conn "conn")))))
 	       (:server
 		(let* ((one-ret (and out-parts
 				     (null (cdr out-parts))
 				     (first out-parts)))
-		       (ret-type (getf (cddr one-ret) :type))
-		       (ret-def  (and one-ret
-				      (wsdl-expand-singleton conn)
-				      eval
-				      (setf ret-type
-					    (soap-find-type nil ret-type :dns))
-				      (eq :complex (car ret-type))
-				      ret-type))
+		       (ret-type (when one-ret
+				   (or
+				    (and (string-equal style "rpc")
+					 (schema-decoded-attribute one-ret "type"))
+				    (and (string-equal style "document")
+					 doc-ret))))
+		       (ret-def  (and ret-type
+				      (cond
+				       ((string-equal style "document")
+					(setf ret-type doc-ret))
+				       ((wsdl-expand-singleton conn)
+					(and
+					 (setf ret-type
+					       (schema-lookup-type conn ret-type))
+					 (setf ret-type
+					       (schema-parts-to-type
+						ret-type :error-p nil))
+					 (eq :complex (car ret-type))
+					 ret-type)))))
 		       (ret-keys   (if ret-def
 				       (mapcar #'(lambda (part)
-						   (do-form (xmp-pick-name nil part)
-							    :preserve))
-					       (cdr (part-name  ret-def)))
+						   (wsdl-intern-name
+						    conn (xmp-pick-name nil part)
+						    :preserve))
+					       (cdr (second ret-def)))
 				     (mapcar
 				      #'(lambda (part)
-					  (do-form (part-name part) :preserve))
+					  (wsdl-intern-name
+					   conn (part-name part) :preserve))
 				      out-parts)))
-		       (ret-name (when ret-def (part-name (first out-parts))))
+		       (ret-vars (mapcar #'(lambda (r)
+					     (wsdl-intern-name conn (string r)))
+					 ret-keys))		       
 		       (ret-parts (if ret-def
 				      (mapcan (lambda (part var)
-						(list (xmp-pick-name nil part)
-						      var))
+						(list 
+						 (list 'quote (xmp-pick-name nil part))
+						 var))
 					      (cdr (second  ret-def))
-					      ret-keys
+					      ret-vars
 					      )
 				    (mapcan 
 				     #'(lambda (part var)
-					 (list (part-name part) var))
-				     out-parts ret-keys)
+					 (list (list 'quote (part-name part)) var))
+				     out-parts ret-vars)
 				    ))
+		       (key-list (mapcar #'(lambda (v r)
+					     (list (list r v)))
+					 key-args in-elts))
 		       )
-		  (push `(',op-name ',in-elts
+		  (push `(,(qt op-name) ,(qt in-elts)
 				    ,@(when action (list :action action))
-				    :lisp-name ',def-name :return ',out-msg-name)
+				    :lisp-name ,(qt def-name)
+				    :return ,(string ret-name))
 			(wsdl-server-exports conn))
 		  (setf comment (format nil "Handler for message ~A" op-name))
-		  (cond ((and one-def ret-def)
-			 `(defun ,def-name (&key ,@in-keys)
-			    ((lambda (&key ,@key-args)
-			       (let ,ret-keys
-				 "INSERT BODY HERE"
-				 (list ,ret-name (list ,@ret-parts))))
-			     ,(first in-keys)))
-			 )
-			(one-def
-			 `(defun ,def-name (&key ,@in-keys)
-			    ((lambda (&key ,@key-args)
-			       (let ,ret-keys
-				 "INSERT BODY HERE"
-				 (list ,@ret-parts)))))
-			 )
-			(ret-def
-			 `(defun ,def-name
-			    (&key ,@key-args)
-			    (let ,ret-keys
-			      "INSERT BODY HERE"
-			      (list ,ret-name (list ,@ret-parts))))
-			 )
-			(t `(defun ,def-name
-			      (&key ,@key-args)
-			      (let ,ret-keys
-				"INSERT BODY HERE"
-				(list ,@ret-parts)))
-			   ))))
+
+		  (if (and one-def (not (string-equal style "document")))
+
+		      (let* ((one-part-name (part-name one-part))
+			     (one-part-var (wsdl-intern-name
+					    conn (string one-part-name))))
+			`(defun ,def-name (&key ((,one-part-name ,one-part-var)))
+			   (apply #'(lambda (&key ,@key-list)
+				      (let ,ret-vars
+					"INSERT BODY HERE"
+					,(if (and ret-def
+						  (not (string-equal style "document")))
+					     `(list
+					       ,(string (part-name (first out-parts)))
+					       (list ,@ret-parts))
+					   `(list ,@ret-parts))))
+				  ,one-part-var)))
+
+		    `(defun ,def-name (&key ,@key-list)
+		       (let ,ret-vars
+			 "INSERT BODY HERE"
+			 ,(if (and ret-def (not (string-equal style "document")))
+			      `(list ,(string (part-name (first out-parts)))
+				     (list ,@ret-parts))
+			    `(list ,@ret-parts))))
+
+		    )
+
+
+
+		  ))
 	       ))
 	   comment)))
       )))
@@ -868,17 +1220,17 @@
 				       &optional error-p)
   (let* (pref bname url (i 0)
 	      )
-    (dolist (spart (schema-collected-parts conn sdef :service))
-      (case (first spart)
-	(:port (if (typecase port 
-		     (integer (eql port i))
-		     (otherwise (eq port (second spart))))
-		   (return (setf pref spart))
-		 (incf i)))))
+    (dolist (spart (schema-collected-parts sdef :service :port))
+      (if (typecase port 
+	    (integer (eql port i))
+	    (otherwise (eq port (schema-component-name spart))))
+	  (return (setf pref spart))
+	(incf i)))
     (when pref
-      (setf bname (xmp-getf conn (getf (cddr pref) :attributes) "binding"))
-      (setf url (xmp-getf conn (cdr (assoc :soap-address (getf (cddr pref) :content)))
-		      "location")))
+      (setf bname (schema-decoded-attribute pref "binding"))
+      (setf url  (schema-decoded-attribute 
+		  (schema-single-part pref :soap-address)
+		  "location")))
 
     (if (and sdef pref bname url)
 	(values bname url)
@@ -889,58 +1241,239 @@
 
 
 (defmethod make-client-interface ((conn wsdl-file-connector) service destination
-				  &rest args
-				  &key
-				  port verbose
-				  (eval t)
-				  (lisp-package :keyword)
-				  (file-package :user)
-				  (expand-singleton t)
-				  (if-missing-package :warn)
-				  null-element (empty-element nil)
-				  (prefix :client-) (suffix :index))
-  (declare (ignore port eval lisp-package file-package null-element empty-element
-		   expand-singleton prefix suffix if-missing-package verbose))
+				  &rest args)
   (apply 'wsdl-make-interface conn service destination :client args))
 
 (defmethod make-server-interface ((conn wsdl-file-connector) service destination
-				  &rest args
-				  &key
-				  port verbose
-				  (eval t)
-				  (lisp-package :keyword)
-				  (file-package :user)
-				  (expand-singleton t)
-				  null-element (empty-element nil)
-				  (prefix :server-) (suffix :index)
-				  action (if-missing-package :warn)
-				  message-dns
-				  )
-  (declare (ignore port eval lisp-package file-package null-element empty-element
-		   expand-singleton prefix suffix action message-dns if-missing-package 
-		   verbose))
+				  &rest args)
   (apply 'wsdl-make-interface conn service destination :server args))
 				  
+(defmethod wsdl-intern-name ((conn wsdl-file-connector) form &optional preserve
+			     &aux (file-package (wsdl-file-package conn)) pos)
+  (etypecase form
+    ((or string symbol)
+     (setf form (string form))
+     
+     ;; This function is used only to make Lisp symbols for generated code.
+     (when (setf pos (position #\: form))
+       ;; Drop namespace qualifier if there.
+       (setf form (subseq form (1+ pos))))
+
+     (etypecase preserve
+       ((member :preserve) (intern form file-package))
+       (null (let ((*package* file-package))
+	       (read-from-string form)))
+       ))))
+
+
+(defun break-at-case-shifts (s &aux c h maybe-long-upper out)
+  (dotimes (i (length s)
+	      (when (if maybe-long-upper
+			(setf h maybe-long-upper)
+		      h)
+		(setf out (concatenate 'string
+					     (or out "") (if out "-" "")
+					     (subseq s h i))))
+	      )
+    (setf c (elt s i))
+    (cond ((upper-case-p c)
+	   (cond ((null h))
+		 ((null out) (setf out (subseq s h i)))
+		 (t (setf out (concatenate 'string
+					   out "-" (subseq s h i)))))
+	   (setf h nil)
+	   (cond (maybe-long-upper)
+		 (t (setf maybe-long-upper i))))
+	  ((null maybe-long-upper) (or h (setf h i)))
+	  (t (cond
+	      ((eql (1- i) maybe-long-upper) 
+	       ;;   aaaAx  --> aaa-Ax
+	       (setf h maybe-long-upper))
+	      ((null out)
+	       ;;   AABx  --> AA-Bx 
+	       (setf out (subseq s maybe-long-upper (1- i)))
+	       (setf h (1- i)))
+	      (t
+	       ;;   ...AABx  --> ...-AA-Bx
+	       (setf out (concatenate
+			  'string out "-" (subseq s maybe-long-upper (1- i))))
+	       (setf h (1- i))))
+	     (setf maybe-long-upper nil)))
+    )
+  (string-downcase out))
+	  
+					   
+
+
+
+(defmethod wsdl-compose-part ((conn wsdl-file-connector) part
+			      &aux
+			      (comp (wsdl-compose-strategy conn))
+			      (conflict (wsdl-maybe-conflicts conn))
+			      )
+  (case comp
+    (:hyphen
+     ;; break string at down-up case shift, insert hyphen, downcase all
+     (break-at-case-shifts part)
+     )
+    (:hyphen-if-ok
+     ;; apply only if maybe-conflicts is nil
+     (if (null conflict)
+	 (break-at-case-shifts part)
+       part))
+    (:downcase  (string-downcase part))
+    (:downcase-if-ok
+     (if (null conflict)
+	 (string-downcase part)
+       part))
+    (otherwise
+     ;; keep the case
+     part)))
+
+(defmethod wsdl-compose-name ((conn wsdl-file-connector) package &rest parts)
+  (let (mode (file-package (wsdl-file-package conn)))
+    (case *current-case-mode* 
+      (:case-sensitive-lower (setf mode :modern))
+      (:case-insensitive-upper (setf mode :ansi)))
+    (let ((*package* (typecase package
+		       (null file-package)
+		       (package package)
+		       (otherwise (or (find-package package) 
+				      (error "Cannot find the package ~S" package))))))
+      (read-from-string (format nil "~{~A~}"
+				(mapcar #'(lambda (part)
+					    (typecase part
+					      (null "")
+					      (string (wsdl-compose-part conn part))
+					      (symbol
+					       (case mode
+						 (:ansi (string-downcase part))
+						 (otherwise part)))
+					      (otherwise part)))
+					parts))))))
+    
+
+
+(defmethod wsdl-index-form ((conn wsdl-file-connector) form &rest comments)
+  (with-slots
+   (def-list sub-list def-index) conn
+   (etypecase form
+     (cons
+      (let* ((key (first form))
+	     (place (assoc key def-index))
+	     (name (case key
+		     (defun (second form))
+		     ((define-soap-element define-soap-type)
+		      (maybe-second (third form)))
+		     (otherwise (second form))))
+	     )
+	(or place (push (setf place (list key)) def-index))
+	(and comments (consp (car comments)) (null (cdr comments))
+	     (setf comments (car comments)))
+	(push (if comments
+		  (cons name comments)
+		name)
+	      (cdr place)))
+      (push (cons form comments) def-list)
+      (push (first def-list) sub-list)
+      form))))
+
+(defmethod wsdl-walk-form ((conn wsdl-file-connector) form pl
+			   &aux all-names maybe-conflicts change)
+  (case (setf maybe-conflicts (wsdl-maybe-conflicts conn))
+    (:unknown (setf maybe-conflicts nil)))
+  (labels ((same-string (s1 s2) (typecase s1
+				  (string (typecase s2
+					    (string (equal s1 s2))))
+				  (symbol (typecase s2
+					    (symbol (eq s1 s2))))))
+	   (walk (form) (typecase form
+			  (symbol (pushnew (symbol-package form) pl)
+				  (dolist (name all-names)
+				    (cond ((eq form name))
+					  ((equal form name))
+					  ((string-equal form name)
+					   (pushnew form maybe-conflicts
+						    :test #'same-string))))
+				  )
+			  (string (dolist (name all-names)
+				    (cond ((equal form name))
+					  ((string-equal form name)
+					   (pushnew form maybe-conflicts
+						    :test #'same-string))))
+				  )
+			  (cons (walk (car form))
+				(walk (cdr form))))))
+    (or (equal maybe-conflicts (wsdl-maybe-conflicts conn))
+	(setf change t))
+    (walk form)
+    (setf (wsdl-maybe-conflicts conn) maybe-conflicts)
+    (values pl change)))
+
+(defmethod wsdl-post-process ((conn t) (defs t)) nil)
+
+(defun wsdl-print-lines (stream prefix &rest lines)
+  (or prefix (format stream "~&#|~%"))
+  (dolist (l lines)
+    (typecase l
+      ((integer 1 9) (format stream "~&~V%" l))
+      (string (format stream "~&~A~A~%" (or prefix "") l))
+      (otherwise (format stream "~&~A~S~%" (or prefix "") l))))
+  (or prefix (format stream "~&|#~%"))
+  nil)
+
+(defmethod wsdl-describe ((conn wsdl-file-connector) defs stream depth)
+  (dolist (def defs)
+    (cond
+     ((eq 'defun (getf (cdr (first def)) :key))
+      (format stream "~A~%" (first (first def)))
+      (dolist (entry (cdr def))
+	(typecase entry
+	  (cons
+	   (format stream "~&~%     ~A  ~A~%" 
+		   (first entry) (second entry))
+	   (when (third entry)
+	     (describe-soap-method 
+	      (third entry) :wsdl conn :stream stream :depth depth)))
+	  (otherwise (format stream "~&~%     ~S~%" entry))))
+      (format stream "~%"))
+     ((and (cdr def) (null (cddr def)) (atom (second def)))
+      (format stream "~A ~S~2%" (first (first def)) (second def)))
+     ((and (cdr def) (consp (second def)))
+      (format stream "~A~%~{     ~{~S ~}~%~}~%"
+	      (first (first def)) (cdr def)))
+     (t
+      (format stream "~A~%~{     ~S~%~}~%" 
+	      (first (first def)) (cdr def))))))
 
 (defmethod wsdl-make-interface ((conn wsdl-file-connector) service destination
 				mode
 				&key
 				port verbose
-				(eval t evp)
+				eval
 				(lisp-package :keyword)
 				(file-package :user)
-				(expand-singleton
-				 (if evp
-				     (if eval t nil)
-				   t))
+				(expand-singleton t)
 				null-element (empty-element nil eep)
 				(prefix (format nil "~A-" mode))
 				(suffix :index)
+				(compose :hyphen-if-ok)
 				action (if-missing-package :warn)
 				message-dns
 				(if-exists :supersede)
-				&aux w open defs dstream dfile 
-				head-forms forms tail-forms
+				body-form
+				map
+				object-class message-method-prefix
+				(text-file :txt) ;;; stream|path|:insert|:txt|nil
+				(class-file :insert)
+				(post-file  :insert)
+				connect-class built-in-arrays defined-arrays
+				send-atype send-asize sequence
+
+				&aux
+				w open dstream tstream dfile tfile topen
+				cstream copen cfile pstream popen pfile
+				head-forms tail-forms class-forms wrap-forms post-forms
 				sdef bname port-name pdef opdefs bdef
 				binding btype url
 				(*xmp-warning-leader* "WSDL"))
@@ -949,321 +1482,762 @@
   (and (numberp service)
        (setf w (nth service (wsdl-service-names conn)))
        (setf service w))
-  (or (setf sdef (assoc service (cdr (wsdl-services conn)) :test #'string-equal))
+  (or (setf sdef (schema-collected-component
+		  conn #'wsdl-services #'schema-component-name service t))
       (error "Cannot find service ~S" service))
   (setf (wsdl-warnings conn) 0)
   (multiple-value-setq (bname url)
     (wsdl-service-binding-names conn sdef port t))
-  (setf bdef (or (assoc bname (cdr (wsdl-bindings conn)))
+  (setf bdef (or (schema-collected-component
+		  conn #'wsdl-bindings #'schema-component-name 
+		  
+		  ;; xmethods.com QueryInterfaceService uses the wrong namespace
+		  (string bname)
+
+		  )
 		 (error "Cannot find binding ~S" bname)))
-  (setf binding (getf (cdr bdef) :binding))
-  (setf btype   (getf (cdr bdef) :type))
+  (setf binding bdef)
+  (setf btype   (schema-decoded-attribute bdef "type"))
   (setf port-name btype)
-  (setf pdef (or (assoc port-name (cdr (wsdl-port-types conn)))
+  (setf pdef (or (schema-collected-component
+		  conn #'wsdl-port-types #'schema-component-name port-name)
 		 (error "Cannot find portType ~S" port-name)))
-  (setf opdefs (getf (cdr pdef) :port-type))
+  (setf opdefs (schema-collected-parts pdef :port-type :operation))
 
   (etypecase destination
     (stream (setf dstream destination))
-    ((member nil t) (setf dstream destination))
-    (string (setf dfile destination)
-	    )
+    ((member nil t) (setf dstream destination tstream destination))
+    (string (setf dfile destination))
+    (pathname (setf dfile destination))
     )
-  (when (and expand-singleton (null eval))
-    (warn "expand-singleton=t is ignored when eval=nil"))
 
-  (flet ((dstream ()
-		  (cond (dstream)
-			(dfile 
-			 (setf open t
-			       dstream (open destination
-					     :direction :output
-					     :if-exists if-exists))))))
+  (labels
+      ((get-stream (stream file openp)
+		   (cond (stream (values stream openp))
+			 (file   (values (open file
+					   :direction :output
+					   :if-exists if-exists)
+					 t))
+			 (t (values stream openp))
+			 ))
+       (get-file  (infile base &aux stream file)
+		  (etypecase infile
+		    (null (setf stream nil file nil))
+		    ((member :insert) (setf stream base))
+		    ((member :txt)
+		     (setf file (namestring
+				 (make-pathname :type "txt" :defaults base))))
+		    (stream (setf stream infile))
+		    (string (setf file infile))
+		    (pathname (setf file infile))
+		    )
+		  (values stream file))
+       (dstream () (or dstream
+		       (multiple-value-setq (dstream open)
+			 (get-stream dstream dfile open)))
+		dstream)
+       (tstream ()
+		(cond (tstream)
+		      (t (multiple-value-setq (tstream tfile)
+			   (get-file text-file (dstream)))
+		       (or tstream
+			   (multiple-value-setq (tstream topen)
+			     (get-stream tstream tfile topen)))
+		       tstream)))
+       (cstream ()
+		(cond (cstream)
+		      (t (multiple-value-setq (cstream cfile)
+			   (get-file class-file (dstream)))
+		       (or cstream
+			   (multiple-value-setq (cstream copen)
+			     (get-stream cstream cfile copen)))
+		       cstream)))
+       (pstream ()
+		(cond (pstream)
+		      (t (multiple-value-setq (pstream pfile)
+			   (get-file post-file (dstream)))
+		       (or pstream
+			   (multiple-value-setq (pstream popen)
+			     (get-stream pstream pfile popen)))
+		       pstream)))
+       (do-file (item &optional (stream nil s-p)
+		      &aux (form (first item)) (comments (cdr item)))
+		(or s-p (setf stream (dstream)))
+		(when stream
+		  (when comments
+		    (format stream "~&~%~%")
+		    (dolist (c comments)
+		      (or (symbolp c) (wsdl-print-lines stream ";; " c))))
+		  (let ((*package* file-package))
+		    (format stream "~&~%~S~%" form))))
+       (trim-defs (conn &aux (forms (reverse (wsdl-sub-list conn))))
+		  (setf (wsdl-sub-list conn) nil)
+		  forms)
+       )
 
-    (flet ((do-form
-	    (form &rest comments)
-	    (etypecase form
-	      ((or string symbol)
-	       (setf form (string form))
-	       (etypecase (first comments)
-		 ((member :preserve) (intern form file-package))
-		 (null (let ((*package* file-package))
-			 (read-from-string form)))
-		 ))
-	      (cons
-	       (let* ((key (first form))
-		      (place (assoc key defs))
-		      (name (case key
-			      (defun (second form))
-			      ((define-soap-element define-soap-type)
-			       (second (third form)))
-			      (otherwise (second form))))
-		      )
-		 (or place (push (setf place (list key)) defs))
-		 (and comments (consp (car comments)) (null (cdr comments))
-		      (setf comments (car comments)))
-		 (push (if comments
-			   (cons name comments)
-			 name)
-		       (cdr place)))
-	       (push (cons form comments) forms)
-	       (when eval (eval form))
-	       form)))
-	   (do-file (item &aux (form (first item)) (comments (cdr item)))
-		    (when (dstream)
-		      (when comments
-			(format (dstream) "~&~%~%")
-			(dolist (c comments)
-			  (or (symbolp c) (format (dstream) ";; ~A~%" c))))
-		      (let ((*package* file-package))
-			(format (dstream) "~&~%~S~%" form))))
-	   (desc (defs stream depth)
-		 (dolist (def defs)
-		   (cond
-		    ((eq 'defun (getf (cdr (first def)) :key))
-		     (format stream "~A~%" (first (first def)))
-		     (dolist (entry (cdr def))
-		       (typecase entry
-			 (cons
-			  (format stream "~&~%     ~A  ~A~%" 
-				  (first entry) (second entry))
-			  (when (third entry)
-			    (describe-soap-method (third entry) stream depth)))
-			 (otherwise (format stream "~&~%     ~S~%" entry))))
-		     (format stream "~%"))
-		    ((and (cdr def) (null (cddr def)) (atom (second def)))
-		     (format stream "~A ~S~2%" (first (first def)) (second def)))
-		    ((and (cdr def) (consp (second def)))
-		     (format stream "~A~%~{     ~{~S ~}~%~}~%"
-			     (first (first def)) (cdr def)))
-		    (t
-		     (format stream "~A~%~{     ~S~%~}~%" 
-			     (first (first def)) (cdr def))))))
-	   )
+    (unwind-protect
+	(let (soap-binding x maybe-conflicts)
 
-      (unwind-protect
-	  (let (soap-binding x ctype stype found-ctype)
+	  (setf (wsdl-undef-ns conn) nil
+		(wsdl-props conn) nil
+		(wsdl-maybe-conflicts conn) :unknown
+		(wsdl-soap-address conn) url
+		(wsdl-operations conn) opdefs
+		(wsdl-expand-singleton conn) expand-singleton
+		(wsdl-wdef-list conn) nil
+		(wsdl-sub-list conn) nil
+		(wsdl-def-index conn) nil
+		(wsdl-compose-strategy conn) compose
+		(wsdl-map-name conn) (or map (wsdl-compose-name
+					      conn :keyword prefix "namespaces"))
+		(wsdl-client-options conn)
+		`( ,@(when lisp-package (list :lisp-package lisp-package))
+		     ,@(when null-element (list :null-element null-element))
+		     ,@(when eep (list :empty-element empty-element)) 
+		     ,@(when body-form (list :body-form body-form))
+		     ,@(when connect-class (list :class (list 'quote connect-class)))
+		     )
+		(wsdl-options conn) (list :built-in-arrays built-in-arrays
+					  :defined-arrays defined-arrays 
+					  :message-method-prefix message-method-prefix
+					  :send-atype send-atype :send-asize send-asize
+					  :prefix prefix :sequence sequence
+					  )
+		)
 
-	    (setf (wsdl-undef-ns conn) (case if-missing-package
-					 ((:error :warn) nil)
-					 (otherwise (list :if-missing-package
-							  if-missing-package)))
-		  (wsdl-soap-address conn) url
-		  (wsdl-operations conn) opdefs
-		  (wsdl-expand-singleton conn) expand-singleton
-		  (wsdl-client-options conn)
-		  `( ,@(when lisp-package (list :lisp-package lisp-package))
-		       ,@(when null-element (list :null-element null-element))
-		       ,@(when eep (list :empty-element empty-element)) 
-		       )
-		  )
+	  (cond ((null file-package) (setf file-package *package*))
+		((packagep file-package))
+		((setf x (find-package file-package))
+		 (setf file-package x))
+		(t (error "Cannot find package ~S" file-package)))
+	  (wsdl-index-form
+	   conn `(in-package ,(make-symbol (package-name file-package))))
+	  (setf (wsdl-file-package conn) file-package)
+	  (setf (wsdl-url-name conn)
+		(wsdl-compose-name conn nil "*" prefix "service-url*"))
+	  (wsdl-index-form
+	   conn `(defpackage ,(make-symbol (package-name file-package))
+		   (:use ,@(mapcar #'(lambda (p)
+				       (make-symbol (package-name p)))
+				   (package-use-list file-package)))))
+	  
+	  (setf head-forms (trim-defs conn))
 
-	    (cond ((null file-package) (setf file-package *package*))
-		  ((packagep file-package)
-		   (do-form `(in-package ,(make-symbol (package-name file-package)))))
-		  ((setf x (find-package file-package))
-		   (setf file-package x)
-		   (do-form `(in-package ,(make-symbol (package-name file-package)))))
-		  (t (error "Cannot find package ~S" file-package)))
-	    (do-form `(defpackage ,(make-symbol (package-name file-package))
-			(:use ,@(mapcar #'(lambda (p)
-					    (make-symbol (package-name p)))
-					(package-use-list file-package)))))
-
-	    (setf head-forms (reverse forms))
-	    (setf forms nil)
-
-	    (dolist (typedef (cdr (schema-types conn)))
-	      (wsdl-define-type conn typedef  #'do-form))
-	    (dolist (edef (cdr (schema-elements conn)))
+	  (dolist (typedef (cdr (schema-types conn)))
+	    (wsdl-define-type conn typedef))
+	  (dolist (edef (cdr (schema-elements conn)))
+	    (wsdl-define-element conn edef))
 	    
-	      ;; edef -> (name :element ((:complex-type type-name-or-nil
-	      ;;                            :complex-type (:content e-type-def))
-	      ;;      -> (name :type type :attributes attrs)
-	      ;;      -> (name :attributes attrs)            ANY content
-	      ;; e-type-def (collector e-type-def-part ... )
-	      ;; e-type-def-part -> (:element name :type type :attributes attrs
-	      ;;                                   :content content)
-	      ;;                 -> (:any . attributes)
-	      (setf found-ctype nil)
-	      (do-form `(define-soap-element nil ',(first edef)
-			  ',(cond ((setf ctype (getf (cdr edef) :element))
-				   (do ((tail (assoc :complex-type ctype) (cddr tail)) x)
-				       ((atom tail)
-					(if found-ctype
-					    (list :complex (list :seq))
-					  (error "Element without a type ~S" edef)))
-				     (case (first tail)
-				       (:complex-type
-					(setf found-ctype t)
-					(cond
-					 ((and (consp (second tail))
-					       (setf x (second
-							(assoc :content (second tail)))))
-					  (let* ((collector (first x))
-						 (elements
-						  (mapcar
-						   #'(lambda (e)
-						       (ecase (first e)
-							 (:element
-							  (list :element
-							     (list (second e))
-							     (getf (cddr e) :type)))
-							 (:any (list :any)))
-						       )
-						   (cdr x))))
-					    (return
-					     (list :complex
-						   (list* collector elements)))))
-					 ((and (atom (second tail)) (second tail))
-					  (return (second tail))))))))
-				  ((setf stype (getf (cdr edef) :type))
-				   stype)
-				  (t `(:complex (:seq* (:any)))))
-			  ))
-	      ) ;;; end (dolist (edef))
+	  (when (setf soap-binding (schema-single-part binding :soap-binding))
 
-	    (dolist (b binding)
-	      (case (first b)
-		(:soap-binding
+	    ;; (:soap-binding style rpc|document transport URIstring) ???
 
-		 ;; (:soap-binding style rpc|document transport URIstring) ???
+	    (setf (wsdl-soap-style conn)
+		  (schema-raw-attribute soap-binding "style")))
 
-		 (when soap-binding (warn "wsdl:binding - Found second ~S" b))
-		 (setf soap-binding b)
-		 (setf (wsdl-soap-style conn)
-		       (xmp-getf conn (cdr soap-binding) "style"))
-		 )
-		(:operation nil)
-		(otherwise (warn "wsdl:binding - Found sub-element ~S" b))))
-	    (dolist (b binding)
-	      (case (first b)
-		(:operation
-		 (wsdl-bind-operation conn b mode #'do-form eval prefix suffix))))
+	  (dolist (b (schema-component-content binding))
+	    (case (schema-element-key b)
+	      (:operation
+	       (wsdl-bind-operation conn b mode eval prefix suffix))))
 
-	    (case mode
-	      (:server
-	       (do-form
-		`(defun ,(do-form "make-server") (&optional (,(do-form "port") 8080))
-		   (let ((,(do-form "s")
-			  (soap-message-server
-			   :start (list :port ,(do-form "port")) :enable :start
-			   :publish (list :path
-					  ,(xmp-resolve-uri (wsdl-soap-address conn) t))
-			   ,@(when action (list :action action))
-			   :lisp-package :keyword
-			   ,@(if message-dns
-				 (list :message-dns (list 'quote message-dns))
-			       (list :message-dns '*application-namespaces*)
-			       )
-			   )))
-		     ,@(mapcar #'(lambda (ex)
-				   (list* 'soap-export-method (do-form "s") ex))
-			       (wsdl-server-exports conn))
-		     ,(do-form "s"))))))
+	  (case mode
+	    (:server
+	     (wsdl-index-form
+	      conn
+	      `(defun ,(wsdl-compose-name conn nil prefix "make-server")
+		 (&optional (,(wsdl-intern-name conn "port") 8080))
+		 (let ((,(wsdl-intern-name conn "s")
+			(soap-message-server
+			 :start (list :port ,(wsdl-intern-name conn "port"))
+			 :enable :start
+			 :publish (list :path
+					,(xmp-resolve-uri (wsdl-soap-address conn)
+							  :path))
+			 ,@(when action (list :action action))
+			 :lisp-package :keyword
+			 ,@(if message-dns
+			       (list :message-dns (list 'quote message-dns))
+			     (list :message-dns 
+				   (list 'quote (wsdl-map-name conn)))
+			     )
+			 ,@(when body-form (list :body-form body-form))
+			 )))
+		   ,@(mapcar #'(lambda (ex)
+				 (list* 'soap-export-method
+					(wsdl-intern-name conn "s")
+					ex))
+			     (wsdl-server-exports conn))
+		   ,(wsdl-intern-name conn "s"))))))
 						   
-	    (when (wsdl-undef-ns conn)
-	      (case if-missing-package
-		(:error (error "There are no Lisp packages defined for namespaces ~S"
-			       (wsdl-undef-ns conn)))
-		(:warn
-		 (dolist (ns (wsdl-undef-ns conn))
-		   (warn "There is no Lisp package defined for namespace ~S"
-			 ns)))))
+	  (when (wsdl-undef-ns conn)
+	    (case if-missing-package
+	      (:error (error "There are no Lisp packages defined for namespaces ~S"
+			     (wsdl-undef-ns conn)))
+	      (:warn
+	       (dolist (ns (wsdl-undef-ns conn))
+		 (warn "There is no Lisp package defined for namespace ~S"
+		       ns)))))
 
 	    
-	    (setf tail-forms (reverse forms))
-	    (setf forms nil)
+	  (setf tail-forms (trim-defs conn))
+
+	  (let (pl px pn)
+	    
 	    ;; do this last to pick up any packages created during 
 	    ;; interface generation
-	    (dolist (nsd (nse-defs (xmp-message-dns conn)))
-	      (or (eq (find-package :keyword)
-		      (find-package (nsd-package nsd)))
-		  (do-form `(defpackage ,(nsd-package nsd) (:use)))))
-	    (do-form `(defparameter *application-namespaces* ',(xmp-message-dns conn)))
+
+	    (setq pl (wsdl-walk-form conn (wsdl-def-list conn) pl))
+	    (wsdl-emit-object-classes conn object-class)
+	    (setf class-forms (trim-defs conn))
+
+	    (setq pl (wsdl-walk-form conn (wsdl-def-list conn) pl))
+	    (wsdl-emit-wrappers conn (reverse (wsdl-def-list conn)))
+	    (setf wrap-forms (trim-defs conn))
 	    
-	    (let (pdefs)
-	      (dolist (def defs)
-		(push
-		 (cons
-		  (append
-		   (case (first def)
-		     (defun (list 1 "Defined functions:"))
-		     (define-soap-element (list 2 "Defined SOAP elements:"))
-		     (define-soap-type    (list 3 "Defined SOAP types:"))
-		     (defparameter        (list 4 "Defined parameters:"))
-		     (defpackage          (list 5 "Defined packages:"))
-		     (in-package          (list 6 "Lisp package of generated file:"))
-		     (otherwise           (list 7 "Other entries:"))
-		     )
-		   (list :key (first def)))
-		  (cdr def))
-		 pdefs))
-	      (push (list (list 0 "Output in file:" :key :file) destination) pdefs)
-	      (setf pdefs (sort pdefs #'< :key #'caar))
-	      (mapc #'(lambda (def) (setf (car def) (cdr (car def)))) pdefs)
+	    (setq pl (wsdl-walk-form conn (wsdl-def-list conn) pl))
+	    (wsdl-post-process conn (reverse (wsdl-def-list conn)))
+	    (setf post-forms (trim-defs conn))
+	    
+	    (dolist (nsd (nse-defs (or message-dns
+				       (xmp-message-dns conn))
+				   :one :package))
+	      (or (eq (find-package :keyword)
+		      (nsd-package nsd))
+		  (when (member (nsd-package nsd) pl)
+		    (push (list 'quote
+				(list (setf pn (make-symbol
+						(package-name (nsd-package nsd))))
+				      (nsd-prefix nsd)
+				      (nsd-uri nsd)
+				      ))
+			  px)
+		    (wsdl-index-form
+		     conn `(defpackage ,pn (:use))))))
+	    (wsdl-index-form
+	     conn `(define-namespace-map ,(qt (wsdl-map-name conn))
+		     ,(qt (nse-default (or message-dns (xmp-message-dns conn))))
+		     ,@px))
+	    (wsdl-index-form
+	     conn `(defvar ,(wsdl-url-name conn)
+		     ,(wsdl-soap-address conn)))
+	    )
+	    
+	  (let (pdefs)
+	    (dolist (def (wsdl-def-index conn))
+	      (push
+	       (cons
+		(append
+		 (case (first def)
+		   (defun (list 1 "Defined functions:"))
+		   (define-soap-element (list 2 "Defined SOAP elements:"))
+		   (define-soap-type    (list 3 "Defined SOAP types:"))
+		   (defparameter        (list 4 "Defined parameters:"))
+		   (defpackage          (list 5 "Defined packages:"))
+		   (in-package          (list 6 "Lisp package of generated file:"))
+		   (otherwise           (list 7 "Other entries:"))
+		   )
+		 (list :key (first def)))
+		(cdr def))
+	       pdefs))
+	    (push (list (list 0 "Output in file:" :key :file) destination) pdefs)
+	    (setf pdefs (sort pdefs #'< :key #'caar))
+	    (mapc #'(lambda (def) (setf (car def) (cdr (car def)))) pdefs)
 
-	      (when (dstream)
-		(do-file (first head-forms))
-		(format (dstream) "~&~%#|~%")
-		(desc (cdr pdefs) (dstream) 3)
-		(format (dstream) "~&|#~2%")
-		(dolist (item (cdr head-forms))
-		  (do-file item))
-		(dolist (item (reverse forms))
-		  (do-file item))
-		(dolist (item tail-forms)
-		  (do-file item))
-		)
-	      (when verbose
-		(format t "~&~2%")
-		(desc pdefs t nil)
-		(format t "~2%"))
+	    (when (dstream)
+	      (do-file (first head-forms))
 
-	      (when (and (wsdl-warnings conn)
-			 (not (eql 0 (wsdl-warnings conn))))
-		(error "Serious warnings in WSDL processing: ~A"
-		       (wsdl-warnings conn)))
+	      (cond ((eq *current-case-mode* :case-insensitive-upper)
+		     (do-file 
+		      `((eval-when (compile load eval)
+			  (or (eq *current-case-mode* :case-insensitive-upper)
+			      (error "~A~A"
+				     "This file makes sense only when "
+				     "*current-case-mode* is :case-insensitive-upper")))
+			"WARNING")))
+		    ((consp (setf maybe-conflicts (wsdl-maybe-conflicts conn)))
+		     (wsdl-print-lines
+		      (dstream) nil
+		      "The following symbol names may cause problems in ANSI case-mode:"
+		      (sort maybe-conflicts #'string-lessp)))
+		    (t (wsdl-print-lines 
+			(dstream) ";;; "
+			1
+			"Mixed case symbol names are NOT escaped in this file,"
+			"but there do not appear to be any case-sensitivity"
+			"conflicts."
+			""
+			"It MAY be possible to load this file into an ANSI ACL image"
+			"(where all symbols will be case-folded to uppercase)."
+			1
+			))
+		    )
+	      (when (wsdl-overloaded-ops conn)
+		(multiple-value-call
+		 #'wsdl-print-lines (dstream) ";;; " 1
+		 "The following types represent overloaded message names:"
+		 (values-list (mapcar #'(lambda (n) (format nil "   ~S" n))
+				      (wsdl-overloaded-ops conn)))
+		 1))		 
+
+	      (when (tstream)
+		(format (tstream) "~&~%#|~%")
+		(wsdl-describe conn (cdr pdefs) (tstream) 3)
+		(format (tstream) "~&|#~2%"))
+	      (dolist (item (cdr head-forms)) (do-file item))
+	      (dolist (item (trim-defs conn))
+		(do-file item))
+	      (dolist (item tail-forms) (do-file item))
+	      (when (and class-forms (cstream))
+		(or (eq (dstream) (cstream))
+		    (do-file (first head-forms) cstream))
+		(wsdl-print-lines cstream ";;; " 2 "*** Class definitions" 1)
+		(dolist (item class-forms) (do-file item cstream)))
+	      (when (and wrap-forms (cstream))
+		(or (eq (dstream) (cstream))
+		    (do-file (first head-forms) cstream))
+		(wsdl-print-lines cstream ";;; " 2 "*** Wrapper definitions" 1)
+		(dolist (item wrap-forms) (do-file item cstream)))
+	      (when (and post-forms (pstream))
+		(or (eq (dstream) (pstream))
+		    (do-file (first head-forms) pstream))
+		(wsdl-print-lines pstream ";;; " 2 "*** More definitions" 1)
+		(dolist (item post-forms) (do-file item pstream)))
+	      )
+	    (when verbose
+	      (format t "~&~2%")
+	      (wsdl-describe conn pdefs t nil)
+	      (format t "~2%"))
+
+	    (when (and (wsdl-warnings conn)
+		       (not (eql 0 (wsdl-warnings conn))))
+	      (error "Serious warnings in WSDL processing: ~A"
+		     (wsdl-warnings conn)))
 	      
-	      pdefs))
-	(when open (close dstream))))))
+	    pdefs))
+      (when open (close dstream))
+      (when topen (close tstream))
+      (when copen (close cstream))
+      (when popen (close pstream))
+      )))
 
-(defun describe-soap-method (elt &optional (stream t) depth)
-  (let* ((type (soap-find-element nil elt :dns))
+(defclass soap-object-class ()
+  ((reader-prefix :allocation :class :initform :soap-get-)
+   (writer-prefix :allocation :class :initform :soap-set-)))
+
+(defclass soap-array-mixin ()
+  ((items :initform nil :initarg :items)))
+
+(defmethod print-object ((x soap-array-mixin) s)
+  (print-unreadable-object 
+   (x s :type t :identity t)
+   (format s "[~A]" (length (slot-value x 'items)))))
+
+(defmethod wsdl-emit-object-classes ((conn wsdl-file-connector) (class null))
+  nil)
+
+(defmethod wsdl-emit-object-classes ((conn wsdl-file-connector) (class symbol))
+  (wsdl-emit-object-classes conn (make-instance class)))
+
+(defmethod wsdl-emit-object-classes ((conn wsdl-file-connector)
+				     (instance soap-object-class)
+				     &aux
+				     (prefix (wsdl-option conn :prefix))
+				     (class (type-of instance))
+				     (reader-prefix (slot-value instance 'reader-prefix))
+				     (writer-prefix (slot-value instance 'writer-prefix))
+				     form encoder defclass-names
+				     (client-options (wsdl-client-options conn))
+				     (cclass (getf client-options :class))
+				     (defs (reverse (wsdl-def-list conn)))
+				     (iname (wsdl-compose-name
+					     conn nil prefix "array-items"))
+				     new-name)
+  (dolist (def defs)
+    ;; First, collect all defined structs.
+    (setf form (first def))
+    (with-tree-match
+     (form (define-soap-type :?any '(:? type-name)
+	     '(:complex (:seq* (:?each nil (:element . :?any))) . :?any) . :?any))
+     ;;(format t "~&; register complex ~A ~%" type-name)
+     (pushnew type-name defclass-names)))
+  (dolist (def defs)
+    ;; Then, collect all defined arrays.
+    (setf form (first def))
+    (with-tree-match
+     (form (define-soap-type :?any '(:? type-name) '(:array (:? atype) . :?any) . :?any))
+     ;;(format t "~&; identify array ~A   elt type ~A~%" type-name atype)
+     (when (or (member atype defclass-names)
+	       (soap-known-type-p conn atype :dns))
+       ;;(format t "~&; register array ~A   elt type ~A~%" type-name atype)
+       (pushnew type-name defclass-names)
+       t)))
+  (setf (wsdl-object-classes conn) defclass-names)
+  ;;(format t "~&; defclass-names = ~S~%" defclass-names)
+  (dolist (def defs)
+    (setf form (first def))
+    (with-tree-match
+     (form (define-soap-type :?any '(:? type-name) '(:? type) . :?any))
+     ;;(format t "~&; defined type ~A ~%" type-name)
+     (when (null encoder)
+       (setf encoder (wsdl-compose-name conn nil prefix :encode))
+       (setf (wsdl-encoder-name conn) encoder))
+     (let* ((class-name type-name)
+	    (decode-name (wsdl-compose-name conn nil :decode- (string type-name)))
+	    elt elts readers writers keys names etypes)
+       (setf new-name (wsdl-compose-name conn nil "new-" (string type-name)))
+       (or
+	(with-tree-match
+	 (type (:complex (:seq* (:?each slots (:element . :?any))) . :?any))
+
+	 ;; Emit defclass, functions new-xxx decode-xxx, method pppencode.
+
+	 (dolist (slot slots)
+	   (push (setf elt (first (second slot))) elts)
+	   (push (third slot) etypes)
+	   (push (wsdl-compose-name conn :keyword elt) keys)
+	   (push (wsdl-compose-name conn nil elt) names)
+	   (push (wsdl-compose-name conn nil reader-prefix elt)
+		 readers)
+	   (push (wsdl-compose-name conn nil writer-prefix elt)
+		 writers)
+	   )
+	 (wsdl-index-form
+	  conn
+	  `(defclass ,type-name (,class)
+	     ( ,@(mapcar #'(lambda (name key reader writer)
+			     (list name
+				   :reader reader
+				   :writer writer
+				   :initarg key
+				   :initform nil))
+			 names keys readers writers)
+		 )))
+	 (net.xmp.soap::wsdl-index-form
+	  conn
+	  `(defun ,new-name (&key ,@names)
+	     (make-instance ,(qt class-name)
+			    ,@(mapcan #'(lambda (key name) (list key name))
+				      keys names))))
+	 (wsdl-index-form
+	  conn
+	  (let ((cvar (wsdl-intern-name conn "conn"))
+		(fvar (wsdl-intern-name conn "soap-result")))
+	    `(defmethod ,decode-name
+	       ,(if cclass
+		    (list (list cvar cclass) (list fvar t))
+		  (list (list cvar t) (list fvar t)))
+	       (make-instance
+		,(qt class-name)
+		,@(mapcan #'(lambda (key elt etype
+					 &aux
+					 (part (list 'soap-result-typed
+						     cvar fvar
+						     (list 'quote etype)
+						     (case (wsdl-option conn :sequence)
+						       (:set* nil)
+						       (otherwise :error))
+						     (string elt)))
+					 )
+			      (when (member etype defclass-names)
+				(setf part (list (wsdl-compose-name
+						  conn nil :decode- (string etype))
+						 cvar part)))
+			      (list key part))
+			  keys elts etypes)))))
+	 (net.xmp.soap::wsdl-index-form
+	  conn
+	  (let ((fvar (wsdl-intern-name conn "instance")))
+	    `(defmethod ,encoder ((,fvar ,type-name))
+	       (list ,@(mapcan #'(lambda (elt acc etype 
+					      &aux (part (list acc fvar)))
+				   (when (member etype defclass-names)
+				     (setf part (list encoder part)))
+				   (list (string elt) part))
+			       elts readers etypes)))))
+	 t) ;;; end match :complex
+	(with-tree-match
+	 (type (:array (:? atype) . :?any))
+	   
+	 ;;(format t "~&; match array ~A   elt type ~A~%" type-name atype)
+
+	 (let (array-of-built-in-type)
+	   (when (or (member atype defclass-names)
+		     (setf array-of-built-in-type (soap-known-type-p conn atype :dns)))
+	     ;;(format t "~&; find array elt type ~A~%" atype)
+	     ;; Emit defclass, function new-xxx, decode-xxx, method pppencode.
+
+	     (net.xmp.soap::wsdl-index-form
+	      conn
+	      `(defclass ,type-name (,class soap-array-mixin)
+		 ((items :accessor ,iname))))
+
+	     (setf new-name (wsdl-compose-name conn nil "new-" (string type-name)))
+	     (net.xmp.soap::wsdl-index-form
+	      conn
+	      (let ((ivar (wsdl-intern-name conn "items")))
+		`(defun ,new-name (&rest ,ivar)
+		   (when (and ,ivar (null (cdr ,ivar))
+			      (typep (first ,ivar) 'sequence))
+		     (setf ,ivar (concatenate 'list (first ,ivar))))
+		   (make-instance ,(qt class-name) :items ,ivar))))
+	     (net.xmp.soap::wsdl-index-form
+	      conn
+	      (let ((cvar (wsdl-intern-name conn "conn"))
+		    (aname (when (null array-of-built-in-type)
+			     (wsdl-compose-name conn nil :decode- (string atype))))
+		    (fvar (wsdl-intern-name conn "soap-result"))
+		    (ivar (wsdl-intern-name conn "items"))
+		    (tvar (wsdl-intern-name conn "tail"))
+		    )
+	     
+		`(defmethod ,decode-name
+		   ,(if cclass
+			(list (list cvar cclass) (list fvar t))
+		      (list (list cvar t) (list fvar t)))
+		   (make-instance ,(qt class-name)
+				  :items
+				  (let ((,ivar (concatenate 'list ,fvar nil)))
+				    ,(if array-of-built-in-type
+					 ivar
+				       `(do ((,tvar ,ivar (cdr ,tvar)))
+					    ((null ,tvar) ,ivar)
+					  (setf (car ,tvar)
+						(,aname ,cvar (car ,tvar))))))
+				  ))))
+	     (net.xmp.soap::wsdl-index-form
+	      conn
+	      (let ((fvar (wsdl-intern-name conn "instance"))
+		    (ivar (wsdl-intern-name conn "item")))
+		`(defmethod ,encoder ((,fvar ,type-name))
+		   ,(if array-of-built-in-type
+			`(,iname ,fvar)
+		      `(mapcar #'(lambda (,ivar) (,encoder ,ivar)) 
+			       (,iname ,fvar)))
+		   )))
+	     t))) ;;; end match :array
+	)
+       )))
+  nil)
+
+
+(defmethod wsdl-emit-wrappers ((conn wsdl-file-connector) defs
+			       &aux msg message reply)
+
+  (when (and (wsdl-encoder-name conn)
+	     (wsdl-option conn :message-method-prefix))
+
+    (dolist (def defs)
+      
+      ;; Do one (separate) pass to generate call wrappers
+      ;;    BEFORE collapsing array types.
+
+      (or
+       (with-tree-match
+	(def ((:? form (define-soap-element :?any 
+			 (:?or (quote (:? name)) (:? name))
+			 . :?any))
+	      . :?any))
+	;; save element defs for use in defun
+	(typecase name
+	  (symbol
+	   ;; must be name of outgoing message
+	   (setf message form reply nil))
+	  (string
+	   ;; must be name of reply
+	   (if reply (setf message nil reply nil) (setf reply form))))
+	t)
+
+       (with-tree-match
+	(def ((defun (:? defun-name) . :?any) . (:? comments)))
+
+	(when (and (setf msg (first (last comments)))
+		   (symbolp msg) message reply)
+	  (with-tree-match
+	   (message (define-soap-element :?any :?any 
+		      '(:complex
+			(:seq (:?each parts (:element . :?any)))
+			. :?any)
+		      . :?any ))
+	   (with-tree-match
+	    (reply  (define-soap-element :?any 
+		      (:? out-name) '(:? out-type) . :?any ))
+	    
+	    (wsdl-emit-wrapper conn msg defun-name parts out-name out-type)
+	    
+	    ))
+	  (setf message nil reply nil)
+	  t))
+       )))
+  
+  (when (or (wsdl-option conn :built-in-arrays)
+	    (wsdl-option conn :defined-arrays))
+	    
+    (dolist (def defs)
+
+      ;; Do one (separate) pass to collapse array types.
+
+      (with-tree-match
+       (def (((:?or define-soap-type define-soap-element)
+	      :?any
+	      :?any 
+	      '(:complex ((:?or :seq :seq*)
+			  (:?each elts (:element . :?any)))
+			 . :?any)
+	      . :?any)
+	     . :?any))
+       (wsdl-collapse-array-types conn elts)
+       )
+      ))
+
+  (when (eq :set* (wsdl-option conn :sequence))
+    (dolist (def defs)
+      (with-tree-match
+       (def ((define-soap-type
+	       :?any
+	       :?any 
+	       '(:complex (:? seq (:seq* . :?any)) . :?any)
+	       . :?any)
+	     . :?any))
+       (setf (first seq) :set*))))
+
+  )
+
+(defmethod wsdl-collapse-array-types ((conn wsdl-file-connector) elts)
+  (dolist (e elts)
+    (when (symbolp (third e))
+      (let (btype 
+	    (aopts (append
+		    (when (wsdl-option conn :send-atype)
+		      (list :send-atype t))
+		    (when (wsdl-option conn :send-asize)
+		      (list :send-asize t))))
+	    (def (wsdl-resolve-type conn (third e))))
+	(with-tree-match 
+	 (def (:array (:? atype) . :?any))
+	 (cond
+	  ((setf btype (soap-known-type-p conn atype :dns))
+	   (case (wsdl-option conn :built-in-arrays)
+	     (:collapse
+
+	      ;; Replace type name with explicit type declaration.
+
+	      (setf (third e) (list* :array btype aopts))))
+	   )
+	  (t (case (wsdl-option conn :defined-arrays)
+	       (:collapse
+
+		;; Replace type name with explicit type declaration.
+
+		(setf (third e) (list* :array atype aopts)))))
+
+	  ))))))
+  
+
+(defmethod wsdl-emit-wrapper ((conn wsdl-file-connector)
+			      msg defun-name parts out-name out-type
+			      &aux
+			      call res
+			      (structs (wsdl-object-classes conn))
+			      (encoder (wsdl-encoder-name conn))
+			      (bvar (wsdl-compose-name conn nil "body"))
+			      (cvar (wsdl-compose-name conn nil "conn"))
+			      (hvar (wsdl-compose-name conn nil "headers"))
+			      (mprefix (wsdl-option conn :message-method-prefix))
+			      )
+
+	      
+  ;; emit wrapper methods for wsdl-generated defun-s
+  ;; methods take positional args specialized on decoded object classes
+
+  (setf call 
+	`(,defun-name
+	   ,@(mapcan
+	      #'(lambda (elt &aux (ename (first (second elt))))
+		  (list (wsdl-compose-name conn :keyword ename)
+			(if (member (third elt) structs)
+			    (list encoder (wsdl-compose-name conn nil ename))
+			  (wsdl-compose-name conn nil ename)))) 
+	      parts)))
+  (or
+   (with-tree-match
+    (out-type  (:complex
+		(:seq
+		 (:? out-elt (:element . :?any)))
+		. :?any))
+    (setf res (list 'soap-result-only
+		    cvar bvar :error
+		    (list 'quote out-name)
+		    (list 'quote 
+			  (first (second out-elt)))))
+    (when (member (third out-elt) structs)
+      (setf res (list (wsdl-compose-name
+		       conn nil
+		       "decode-" (string (third out-elt)))
+		      cvar res)))
+    t)
+   (setf res bvar))
+		    
+  (wsdl-index-form
+   conn
+   `(defmethod ,(wsdl-compose-name conn nil mprefix (string  msg))
+      (,@(mapcar #'(lambda (elt)
+		     (list (wsdl-compose-name conn nil (first (second elt)))
+			   (if (member (third elt) structs)
+			       (third elt)
+			     t)))
+		 parts))
+      (multiple-value-bind (,bvar ,hvar ,cvar) 
+	  ,call
+	(values ,res ,hvar ,cvar))
+
+      ))
+  )
+
+
+
+(defun describe-soap-method (elt &key wsdl (stream t) depth)
+  (let* ((type (or (when wsdl (wsdl-lookup wsdl :element elt :complex))
+		   (soap-find-element wsdl elt :dns)))
 	 (parts (when (and (consp type) (eq :complex (car type)))
 		  (cdr (second type))))
 	 (ret (concatenate 'string (string elt) "Response"))
-	 (rtype (soap-find-element nil ret :dns))
+	 (rtype (or (when wsdl (wsdl-lookup wsdl :element ret :complex))
+		    (soap-find-element wsdl ret :dns)))
 	 (rparts (when (and (consp rtype) (eq :complex (car rtype)))
 		  (cdr (second rtype))))
 	 (indent 6) l)
     (format stream "~&~VAMessage ~S takes ~A argument~A~%"
 	    indent "" elt (setf l (length parts))
 	    (case l (0 "s") (1 ":") (otherwise "s:")))
-    (dolist (part parts) (describe-soap-element part stream depth))
+    (dolist (part parts)
+      (describe-soap-element part :wsdl wsdl :stream stream :depth depth))
     (format stream "~&~VAand returns a result ~A containing the element(s):~%"
 	    indent "" ret)
-    (dolist (part rparts) (describe-soap-element part stream depth))
+    (dolist (part rparts)
+      (describe-soap-element part :wsdl wsdl :stream stream :depth depth))
     stream))
 
-(defun describe-soap-element (eltspec &optional (stream t) depth (indent 8))
+(defun describe-soap-element (eltspec &key wsdl (stream t) depth (indent 8))
   (let (name type)
     (cond ((atom eltspec)
-	   (multiple-value-setq (type name)
-	     (soap-find-element nil eltspec :dns)))
+	   (or (when wsdl (setf type (wsdl-lookup wsdl :element eltspec nil))
+		     (setf name eltspec))
+	       (multiple-value-setq (type name)
+		 (soap-find-element wsdl eltspec :dns))))
 	  ((and (consp eltspec) (eq :element (first eltspec)))
 	   (setf name (xmp-pick-name nil eltspec)
 		 type (third eltspec))))
     (cond (stream (format stream "~&~VAThe element ~S of type "
 			  indent "" name)
-		  (describe-soap-type type stream depth indent)
+		  (describe-soap-type
+		   type :wsdl wsdl :stream stream :depth depth :indent indent)
 		  (format stream "~&"))
 	  (t (format stream "~&~VAThe element ~S of type ~A~%"
 		     indent "" name 
-		     (describe-soap-type type nil nil))))
+		     (describe-soap-type type :wsdl wsdl :stream nil :depth nil))))
     stream))
 
-(defun describe-soap-type (type &optional (stream t) depth (indent 8) &aux res)
+(defun describe-soap-type (type &key wsdl (stream t) depth (indent 8) &aux res)
   (setf res
 	(cond ((symbolp type) (format stream "~S" type))
 	      ((consp type)
@@ -1278,19 +2252,23 @@
 		   (t (format stream "composite with ~A sub-element(s):~%"
 			      (length (cdr (second type))))
 		      (dolist (elt (cdr (second type)))
-			(describe-soap-element elt stream 
-					       (when depth (1- depth))
-					       (+ indent 2)
+			(describe-soap-element elt 
+					       :wsdl wsdl
+					       :stream stream 
+					       :depth (when depth (1- depth))
+					       :indent (+ indent 2)
 					       )))))))))
   (when (and stream type (symbolp type) depth (not (eql depth 0)))
     (incf indent 2) (decf depth)
-    (let ((def (soap-find-type nil type :dns)))
+    (let ((def (or (when wsdl (wsdl-lookup wsdl :type type nil))
+		   (soap-find-type nil type :dns))))
       (cond ((null def)
 	     (format stream "~&~VAThe type ~S is " indent "" type)
 	     (format stream "undefined."))
 	    ((and (consp def) (eq :simple (first def)) (null (second def))))
 	    (t (format stream "~&~VAThe type ~S is " indent "" type)
-	     (describe-soap-type def stream depth indent)))))
+	       (describe-soap-type
+		def :wsdl wsdl :stream stream :depth depth :indent indent)))))
 
   res)
 
@@ -1305,213 +2283,100 @@
 (defvar *wsdl-file-depth* nil)
 
 (defun encode-wsdl-file (file &key
-			      namespaces
+			      (namespaces '(:net.xmp.wsdl))
+			      (base (list nil :wsdl1-namespaces :all))
 			      servers
-			      (target "ThisWebServiceNamespace" t-p)
+			      (target "urn:ThisWebServiceNamespace" t-p)
 			      name
 			      (if-exists :supersede)
-			      &aux (*xmp-warning-leader* "WSDL"))
-  (let* ((dns (xmp-merge-nses
-	       namespaces *wsdl-default-namespaces*))
-	 (conn (make-instance 'wsdl-file-connector :message-dns dns))
+			      (transport "http://schemas.xmlsoap.org/soap/http")
+			      &aux tns (*xmp-warning-leader* "WSDL"))
+  (etypecase target
+    (symbol (if (setf tns (define-namespace target nil nil))
+		(setf target (xnd-uri tns))
+	      (error "Cannot find targetNamespace from package ~A" target)))
+    (string nil)
+    (xmp-namespace-declaration (setf target (xnd-uri target))))
+  (or target (error "Target namespace is required."))
+  (let* (dns
+	 (server-dns (define-namespace-map nil))
+	 (server-base (define-namespace-map nil))
+	 (server-tail (define-namespace-map nil))
+	 (conn (make-instance 'wsdl-file-connector
+			      :message-dns (apply 'define-namespace-map nil 
+						  (nse-default namespaces)
+						  (append
+						   ;; insert a place where each server
+						   ;; message-dns can be spliced 
+						   ;; in front of all others
+						   (list server-dns)
+						   (nse-defs namespaces :one :level)))
+			      :base-dns    (apply 'define-namespace-map nil 
+						  nil
+						  (append 
+						   ;; insert a place where each server
+						   ;; base-dns can be spliced 
+						   ;; in front of generic base
+						   (list server-base)
+						   (nse-defs base :one :level)
+						   ;; insert a place where each server
+						   ;; base tail can be spliced 
+						   ;; in front of generic tail
+						   (list server-tail)
+						   (list (nse-tail base))))
+			      ))
 	 (wpk (net.xmp::xmp-package-to-prefix conn :net.xmp.wsdl :dns))
 	type-defs messages ports bindings services
 	(*wsdl-file-depth* 1)
-	(target-prefix (and target
-			    (xmp-uri-to-prefix conn target :dns)))
-	(name-prefix (if name (string name) "SOAPServer"))
-	counters defined-elements defined-types seen
-	error-messages)
-    (setf dns (xmp-message-dns conn))
+	(target-prefix (if t-p
+			 (or (xmp-uri-to-prefix conn target :dns)
+			     (error "Target namespace ~A prefix is not defined."
+				    target))
+			 "tns"))
+	(target-package (when t-p
+			  (or (xmp-uri-to-package conn target :dns)
+			      (error "Target namespace ~A package is not defined." 
+				     target))))
+	seen error-messages)
+    (setf (wsdl-defined-elements conn) nil
+	  (wsdl-defined-types conn) nil
+	  (wsdl-target-package conn) target-package
+	  (wsdl-counters conn) nil
+	  (wsdl-name-prefix conn) (if name (string name) "SOAPServer")
+	  )
+    (setf dns (xmp-normal-nse (xmp-message-dns conn)))
     (cond
-     ((first dns))
-     (wpk (setf (first dns)
-		(third
-		 (first
-		  (member wpk (cdr dns) :key #'second :test #'equal)))))
-     (t (xmp-error conn :wsdl :string "Cannot determine default namespace.")))
+     ((nse-default dns))
+     (wpk (setf (xnm-default dns)
+		(xnd-uri (xmp-find-namespace :net.xmp.wsdl nil nil))))
+     (t (error "Cannot determine default namespace.")))
 
-    (labels ((make-name (prefix &aux
-				(place (assoc prefix counters :test #'string-equal))
-				)
-			(or place (push (setf place (cons prefix 0)) counters))
-			(incf (cdr place))
-			(if (eql 1 (cdr place))
-			    (typecase prefix
-			      (symbol    (format nil "~A~(~A~)" name-prefix prefix))
-			      (otherwise (format nil "~A~A" name-prefix prefix)))
-			  (typecase prefix
-			    (symbol
-			     (format nil "~A~(~A~)~3,'0D"
-				     name-prefix prefix (cdr place)))
-			    (otherwise (format nil "~A~A~3,'0D"
-					       name-prefix prefix (cdr place))))
-			  ))
-	     (make-tname (name) (if target-prefix
-				    (format nil "~A:~A" target-prefix name)
-				  (format nil "~A" name)))
-	     (add-element (elt type)
-			  (let ((def (assoc elt defined-elements)))
-			    (if def
-				(or (equal type (second def))
-				    (error "Two defs of the same element ~S ~S ~S"
-					   elt (second def) type))
-			      (push (list elt (add-type type)) defined-elements))
-			    nil))
-	     (add-type (type)
-		       (let (name)
-			 (when (not (symbolp type))
-			   (setf name (make-tname (make-name "Type")))
-			   (setf type (list name type)))
-			 (or (and (symbolp type)
-				  (eq (symbol-package type)
-				      (find-package :net.xmp.schema)))
-			     (pushnew type defined-types))
-			 (or name type)))
-	     (encode-type-def
-	      (conn name tdef &key attributes
-		    &aux min max schema)
-	      (case (first tdef)
-
-		;; If element type is not named, then we can emit
-		;;    an anonymous type in the body of the element.
-
-		(:element
-		 `((xs:|element|
-		       "name"
-		       ;; The name attribute seems to be always unqualified ???
-		       ,(string (xmp-pick-name conn tdef))
-		       "type" ,(add-type (third tdef))
-		       ,@attributes)))
-		(:complex
-		 (or (case (first (second tdef))
-		       ;;  :seq  ->  sequence min=0 max=1
-		       (:seq (setf schema 'xs:|sequence| min 0))
-		       ;;  :seq1 ->  sequence min=1 max=1
-		       (:seq1 (setf schema 'xs:|sequence|))
-		       ;;  :seq+ ->  sequence min=1
-		       (:seq+ (setf schema 'xs:|sequence| max "unbounded"))
-		       ;;  :seq* ->  sequence min=0
-		       (:seq* (setf schema 'xs:|sequence| min 0 max "unbounded"))
-		       ;;  :set  ->  all   min=0 max=1
-		       (:set  (setf schema 'xs:|all| min 0))
-		       ;;  :set1 ->  all   min=1 max=1
-		       (:set1 (setf schema 'xs:|all|))
-		       ;;  :set+ ->  NA
-		       ;;  :set* ->  NA
-		       ;;  :or ->  choice
-		       (:or (setf schema 'xs:|choice|))
-		       )
-		     (error "Unrecognized type def ~S" tdef))
-		 `(,(if name
-			`(xs:|complexType| "name" ,(string name))
-		      'xs:|complexType|)
-		      (,schema 
-		       ,@(mapcar #'(lambda (part) (encode-type-def 
-						   conn nil part
-						   :attributes
-						   (append
-						    (when min
-						      (list "minOccurs" min))
-						    (when max
-						      (list "maxOccurs" max)))))
-				 (cdr (second tdef))))))
-		(:array
-		 `(,(if name
-			`(xs:|complexType| "name" ,(string name))
-		      'xs:|complexType|)
-		   (xs:|complexContent|
-		       ((xs:|restriction| "base" enc:|Array|)
-			((xs:|attribute|
-			     "ref" enc:|arrayType|
-			     wsdl:|arrayType|
-			     ,(soap-encoded-array-type
-			       conn (add-type (second tdef)) :dns)))))))
-		(:simple
-		 `((xs:|simpleType| ,@(when name `("name" ,(string name))) 
-		       "type" (second tdef))))
-		(otherwise
-		 (error "Unrecognized type def ~S" tdef)))
-
-
-	      )
-
-	     (message-parts
-	      (elt &aux def)
-	      ;; find definition and make list of parts
-	      (setf def (soap-find-element conn elt :dns))
-	      (cond
-	       ((null def)
-		(error "Cannot find element definition ~S" elt))
-
-;;; If message is defined as a sequence of elements with named types
-;;;    then emit parts <part name=eltname type=elttype />
-
-;;; ??? ONLY in <choice> case ???
-;;; If message is defined as a sequence of named elements with complicated types
-;;;    then emit parts <part name=Partxxx element=eltname />
-
-;;; If message element is defined some other way
-;;;    then emit one <part name=Partxxx type=elttype />
-
-	       (t (let* (kind
-			 (body (typecase def
-				 (atom (setf kind :simple) def)
-				 (cons (setf kind (first def))
-				       (second def))))
-			 (collector (when (consp body) (first body)))
-			 (cparts (when (consp body) (cdr body)))
-			 elements ctypes named 
-			 )
-		    (cond
-		     ((and (eq kind :complex)
-			   (member collector '(:seq :seq1 :set :set1))
-			   (let (ctype)
-			     (setf named t)
-			     (dolist (cpart cparts t)
-			       (or (and (consp cpart)
-					(or (eq (first cpart) :element)
-					    (return nil))
-					(setf ctype (third cpart))
-					(symbolp ctype))
-				   (setf named nil))
-			       (push (xmp-pick-name conn cpart) 
-				     elements)
-			       (push ctype ctypes))))
-		      (reverse
-		       (mapcar #'(lambda (elt type)
-				   (if* named
-					then
-					(add-type type)
-					`((wsdl:|part|
-						"name" ,elt
-						"type" ,type))
-					else
-					(add-element elt type)
-					`((wsdl:|part|
-						"name" ,(make-name "Part")
-						"element" ,elt))))
-			       elements ctypes)))
-		     ;; Method call must be a struct of named parameters
-		     ;;  and reply must be a struct of result and
-		     ;;   named in=out parameters.
-		     (t (error 
-			 "Cannot use definition of element ~S ~S"
-			 elt def))
-		     )))))
-	     )
-
-      (dolist (s (if (and servers (atom servers)) (list servers) servers))
+    (let () 
+      (dolist (s (etypecase servers
+		   (null nil)
+		   (xmp-connector (list servers))
+		   (cons (etypecase (first servers)
+			   (string (list servers))
+			   (xmp-connector servers)
+			   (cons servers)))))
 	(let* ((service-name (when (consp s) (first s)))
 	       (server (if (consp s) (second s) s))
-	       (port-name (or (soap-port-name server) (make-name "Port")))
-	       (binding-name (or (soap-binding-name server) (make-name "Binding")))
-	       (tables (xmp-server-exports s))
+	       (port-name (or (soap-port-name server) (wsdl-make-name conn "Port")))
+	       (binding-name (or (soap-binding-name server)
+				 (wsdl-make-name conn "Binding")))
+	       (tables (xmp-server-exports server))
 	       port-ops bind-ops service-ports)
+	  
+	  (setf (xnm-default server-dns) (nse-default (xmp-message-dns server))
+		(xnm-entries server-dns) (nse-defs (xmp-message-dns server))
+		(xnm-entries server-base) (nse-defs (xmp-base-dns server))
+		(xnm-tail server-tail) (nse-tail (xmp-base-dns server)))
+
 	  (or service-name
 	      (setf service-name (or (soap-service-name server)
-				     (make-name "Service"))))
-	  (push `((wsdl:|port| "name" ,port-name "binding" ,(make-tname binding-name))
+				     (wsdl-make-name conn "Service"))))
+	  (push `((wsdl:|port| "name" ,port-name "binding"
+			,(wsdl-make-tname conn binding-name))
 		  ((wsoap:|address| "location" 
 			  ,(or (xmp-destination-url server) "???")))
 		  )
@@ -1532,9 +2397,7 @@
 				  (op-name (string op-elt))
 				  (res (second def))
 				  (inmsg (string op-elt))
-				  (inmsgq (typecase op-elt
-					   (symbol op-elt)
-					   (string (make-tname op-elt))))
+				  (inmsgq (wsdl-make-tname conn op-elt))
 				  (rpos (search "Request" inmsg))
 				  (outmsg (cond ((and rpos
 						      (eql (length inmsg)
@@ -1545,14 +2408,14 @@
 							      "Response"))
 						(t (concatenate
 						    'string inmsg "Response"))))
-				  (outmsgq (make-tname outmsg))
+				  (outmsgq (wsdl-make-tname conn outmsg))
 				  (tns (when target (list "namespace" target)))
 				  (body `((wsoap:|body|
-						  "use" "encoded"
-						  ,@tns
-						  "encodingStyle" 
-						  ,(soap-encoding-style server)
-						  )))
+						 "use" "encoded"
+						 ,@tns
+						 "encodingStyle" 
+						 ,(soap-encoding-style server)
+						 )))
 				  )
 			     (push `((wsdl:|operation| "name" ,op-name)
 				     ((wsoap:|operation| "soapAction" ,(or action "")))
@@ -1566,10 +2429,10 @@
 				     ((wsdl:|output| "message" ,outmsgq)))
 				   port-ops)
 			     (push `((wsdl:|message| "name" ,inmsg)
-				     ,@(message-parts op-elt))
+				     ,@(wsdl-message-parts conn op-elt))
 				   messages)
 			     (push `((wsdl:|message| "name" ,outmsg)
-				     ,@(message-parts res))
+				     ,@(wsdl-message-parts conn res))
 				   messages)
 
 			     )))
@@ -1578,10 +2441,10 @@
 		ports)
 	  (push `((wsdl:|binding|
 			"name" ,binding-name
-			"type" ,(make-tname port-name))
+			"type" ,(wsdl-make-tname conn port-name))
 		  ((wsoap:|binding|
 			  "style" "rpc"
-			  ;; transport=???
+			  "transport" ,transport
 			  ))
 		  ,@(reverse bind-ops))
 		bindings)
@@ -1589,29 +2452,42 @@
 		  ,@(reverse service-ports))
 		services)
 	  ))
+      (setf (xnm-default server-dns) nil
+	    (xnm-entries server-dns) nil
+	    (xnm-entries server-base) nil
+	    (xnm-tail server-tail) nil)
 
       ;; scan defined-elements and defined-types to build type-defs
       ;;  defined-elements -> ((elt-name type-name) ...)
       ;;  defined-types    -> ({ type-name | (type-name type-def) } ...)
-      (dolist (def defined-elements)
-	(push `((xsd:|element| "name" ,(first def) "type" ,(second def)))
+      (dolist (def (wsdl-defined-elements conn))
+	(push `((xsd:|element| "name" ,(string (first def)) "type" ,(second def)))
 	      type-defs))
       (setf seen nil)
       (loop
-       (let ((old defined-types))
-	 (setf defined-types nil)
-	 (dolist (def old)
-	   (or
-	    (member def seen)
-	    (let* ((name (if (consp def) (first def) def))
-		   (tdef (if (consp def) (second def) (soap-find-type nil name :dns)))
-		   )
-	      (or (consp tdef)
-		  (error "Undefined type ~S" name))
-	      (push def seen)
-	      (push (encode-type-def conn name tdef) type-defs)
-	      )))
-	 (or defined-types (return)))) 
+       (with-slots
+	(defined-types) conn
+	(let ((old defined-types))
+	  (setf defined-types nil)
+	  (dolist (def old)
+	    (or
+	     (member def seen)
+	     (let* ((name (if (consp def) (first def) def))
+		    (tdef (if (consp def)
+			      (second def)
+			    (or
+			     (wsdl-lookup conn :type name nil)
+			     (soap-find-type conn name :dns))))
+		    )
+	       (cond ((soap-known-type-p
+		       ;; do not emit declarations for pre-defined types [bug15454]
+		       conn name :top
+		       :net.xmp.schema :net.xmp.soap.encoding))
+		     ((null tdef) (error "Undefined type ~S" name))
+		     (t (push def seen)
+			(push (wsdl-encode-type-def conn name tdef) type-defs)
+			)))))
+	  (or defined-types (return)))))
    
       (with-open-file
        (s file :direction :output :if-exists if-exists)
@@ -1629,22 +2505,26 @@
 
        (when (not t-p)
 	 (push "A target namespace was not specified" error-messages)
-	 (push "  - using the default URI 'ThisWebServiceNamespace'." error-messages))
+	 (push (format nil "  - using the default URI '~A'." target) error-messages))
        (dolist (m (reverse error-messages))
 	 (xmp-encode-content conn (format nil "<!-- ~A -->~%" m) :sanitize nil))
        (format s "~&~%")
 
        (xmp-encode-begin
 	conn 'wsdl:|definitions| 
-	:namespaces (append (xmp-message-dns conn)
-			    (when target
-			      (list (list nil target-prefix target))))
-	:attributes (when target (list 'wsdl:|targetNamespace| target))
+	:dns t
+	:namespaces (when target
+		      (list nil (list target-package target-prefix target)))
+	:attributes (when target (list "targetNamespace" target))
 	)
 
        (when type-defs
 	 (xmp-encode conn 
-		     `(wsdl:|types| (xsd:|schema| ,@type-defs))
+		     `(wsdl:|types|
+			    ((xsd:|schema|
+				  ,@(when target
+				      (list "targetNamespace" target)))
+			     ,@type-defs))
 		     nil))
        (dolist (m (reverse messages))
 	 ;; (wsdl:|message| message-def)*
@@ -1667,6 +2547,210 @@
        (format s "~&"))
       file
       )))
+
+(defmethod wsdl-message-parts ((conn wsdl-file-connector) elt &aux def)
+  ;; find definition and make list of parts
+  (setf def (soap-find-element conn elt :dns))
+  (cond
+   ((null def)
+    (error "Cannot find element definition ~S" elt))
+
+;;; If message is defined as a sequence of elements with named types
+;;;    then emit parts <part name=eltname type=elttype />
+
+;;; ??? ONLY in <choice> case ???
+;;; If message is defined as a sequence of named elements with complicated types
+;;;    then emit parts <part name=Partxxx element=eltname />
+
+;;; If message element is defined some other way
+;;;    then emit one <part name=Partxxx type=elttype />
+
+   (t (let* (kind
+	     (body (typecase def
+		     (atom (setf kind :simple) def)
+		     (cons (setf kind (first def))
+			   (second def))))
+	     (collector (when (consp body) (first body)))
+	     (cparts (when (consp body) (cdr body)))
+	     elements ctypes named 
+	     )
+	(cond
+	 ((and (eq kind :complex)
+	       (member collector '(:seq :seq1 :set :set1))
+	       (let (ctype)
+		 (setf named t)
+		 (dolist (cpart cparts t)
+		   (or (and (consp cpart)
+			    (or (eq (first cpart) :element)
+				(return nil))
+			    (setf ctype (third cpart))
+			    (symbolp ctype))
+		       (and (atom cpart)
+			    (setf ctype 
+				  (or (wsdl-lookup conn cpart :element nil)
+				      (soap-find-element conn cpart :dns))))
+		       (setf named nil))
+		   (push (xmp-pick-name conn cpart) 
+			 elements)
+		   (push ctype ctypes))))
+	  (reverse
+	   (mapcar #'(lambda (elt type &aux tname)
+		       (if* named
+			    then
+			    (setf tname (wsdl-add-type conn type))
+			    `((wsdl:|part|
+				    "name" ,(string elt)
+				    "type" ,tname))
+			    else
+			    (wsdl-add-element conn elt type)
+			    `((wsdl:|part|
+				    "name" ,(wsdl-make-name conn "Part")
+				    "element" ,(typecase elt
+						 (symbol elt)
+						 (string (wsdl-make-tname conn elt)))
+				    ))))
+		   elements ctypes)))
+	 ;; Method call must be a struct of named parameters
+	 ;;  and reply must be a struct of result and
+	 ;;   named in/out parameters.
+	 (t (error 
+	     "SOAP message is not seq of named parameters ~S ~S"
+	     elt def))
+	 )))))
+
+(defmethod wsdl-make-name ((conn wsdl-file-connector) prefix &aux place)
+  (with-slots
+   (counters name-prefix) conn
+   (setf place (assoc prefix counters :test #'string-equal))
+   (or place (push (setf place (cons prefix 0)) counters))
+   (incf (cdr place))
+   (if (eql 1 (cdr place))
+       (typecase prefix
+	 (symbol    (format nil "~A~(~A~)" name-prefix prefix))
+	 (otherwise (format nil "~A~A" name-prefix prefix)))
+     (typecase prefix
+       (symbol
+	(format nil "~A~(~A~)~3,'0D"
+		name-prefix prefix (cdr place)))
+       (otherwise (format nil "~A~A~3,'0D"
+			  name-prefix prefix (cdr place))))
+     )))
+
+(defmethod wsdl-make-tname ((conn wsdl-file-connector) name)
+  (with-slots (target-package) conn
+	      (if target-package
+		  (intern (format nil "~A" name) target-package)
+		(format nil "~A" name))))
+
+(defmethod wsdl-add-element ((conn wsdl-file-connector) elt type)
+  (with-slots
+   (defined-elements defined-types) conn
+   (let ((def (assoc elt defined-elements :test #'equal)) def2)
+     (if def
+	 (or (equal type (second def))
+	     (and (atom (second def))
+		  (setq def2 (member (second def) defined-types
+				     :test #'equal
+				     :key #'(lambda (x) (if (consp x) (car x) x))
+				     ))
+		  (or (equal type (first def2))
+		      (and (consp (first def2))
+			   (equal type (second (first def2))))))
+	     (error "Two defs of the same element ~S ~S ~S ~S"
+		    elt (second def) (second def2) type))
+       (push (list elt (wsdl-add-type conn type)) defined-elements))
+     nil)))
+
+(defmethod wsdl-add-type ((conn wsdl-file-connector) type)
+  (with-slots
+   (defined-types) conn
+   (let (name)
+     (when (consp type)
+       (case (first type)
+	 (:simple (when (second type) (setf type (second type))))))
+     (when (not (symbolp type))
+       (setf name (wsdl-make-tname conn (wsdl-make-name conn "Type")))
+       (setf type (list name type)))
+     (or (and (symbolp type)
+	      (eq (symbol-package type)
+		  (find-package :net.xmp.schema)))
+	 (pushnew type defined-types :test #'equal))
+     (or name type))))
+
+(defmethod wsdl-encode-type-def ((conn wsdl-file-connector) name tdef
+				 &key attributes
+				 &aux min max schema)
+  (case (first tdef)
+
+    ;; If element type is not named, then we can emit
+    ;;    an anonymous type in the body of the element.
+
+    (:element
+     `((xs:|element|
+	   ,@(let ((name (xmp-pick-name conn tdef)))
+	       (when name
+		 (list
+		  "name"
+		  ;; The name attribute seems to be always unqualified ???
+		  (string name))))
+	   "type" ,(wsdl-add-type conn (third tdef))
+	   ,@attributes)))
+    (:any
+     `((xs:|element|
+	   "type" xsd:|anyType|
+	   ,@attributes)))
+    (:complex
+     (or (case (first (second tdef))
+	   ;;  :seq  ->  sequence min=0 max=1
+	   (:seq (setf schema 'xs:|sequence| min 0))
+	   ;;  :seq1 ->  sequence min=1 max=1
+	   (:seq1 (setf schema 'xs:|sequence|))
+	   ;;  :seq+ ->  sequence min=1
+	   (:seq+ (setf schema 'xs:|sequence| max "unbounded"))
+	   ;;  :seq* ->  sequence min=0
+	   (:seq* (setf schema 'xs:|sequence| min 0 max "unbounded"))
+	   ;;  :set  ->  all   min=0 max=1
+	   (:set  (setf schema 'xs:|all| min 0))
+	   ;;  :set1 ->  all   min=1 max=1
+	   (:set1 (setf schema 'xs:|all|))
+	   ;;  :set+ ->  NA
+	   ;;  :set* ->  NA
+	   ;;  :or ->  choice
+	   (:or (setf schema 'xs:|choice|))
+	   )
+	 (error "Unrecognized type def ~S" tdef))
+     `(,(if name
+	    `(xs:|complexType| "name" ,(string name))
+	  'xs:|complexType|)
+       (,schema 
+	,@(mapcar #'(lambda (part) (wsdl-encode-type-def 
+				    conn nil part
+				    :attributes
+				    (append
+				     (when min
+				       (list "minOccurs" min))
+				     (when max
+				       (list "maxOccurs" max)))))
+		  (cdr (second tdef))))))
+    (:array
+     `(,(if name
+	    `(xs:|complexType| "name" ,(string name))
+	  'xs:|complexType|)
+       (xs:|complexContent|
+	   ((xs:|restriction| "base" enc:|Array|)
+	    ((xs:|attribute|
+		 "ref" enc:|arrayType|
+		 wsdl:|arrayType|
+		 ,(soap-encoded-array-type
+		   conn (wsdl-add-type conn (second tdef)) :dns)))))))
+    (:simple
+     `((xs:|simpleType| ,@(when name `("name" ,(string name))) 
+	   "type" ,(second tdef))))
+    (otherwise
+     (error "Unrecognized type def ~S" tdef)))
+
+
+  )
 	     
 
 (defmethod xmp-encode ((conn wsdl-file-connector) (item t) (type t)
@@ -1727,106 +2811,34 @@
   (when *wsdl-file-depth*
     (format (wsdl-file-stream conn) "~&~VA" (* 2 *wsdl-file-depth*) "")))
 
+(defparameter *wsdl-needed-namespaces*
+  '(
+    ;; (url-sub-string package-name nsprefix)
 
+    ("http://www.w3.org/1999/XMLSchema"    :net.xmp.schema "xsd")
+    ("http://www.w3.org/1999/XMLSchema/"   :net.xmp.schema "xsd")
+    ("http://www.w3.org/2000/10/XMLSchema" :net.xmp.schema "xsd")
+    ("http://www.w3.org/2001/XMLSchema"    :net.xmp.schema "xsd")
+    ("http://www.w3.org/2001/XMLSchema/"   :net.xmp.schema "xsd")
 
-(defun decode-wsdl-namespaces (&key string file uri other-pk base-ns &aux ambi)
-  (when uri 
-    (multiple-value-bind (body rc h ruri)
-	(net.aserve.client:do-http-request uri)
-      (if (and body (eql rc 200))
-	  (setf string body)
-	(error "URI ~A returned error ~S ~S ~S"
-	       uri rc h ruri))))
-  (multiple-value-bind (xml pns)
-      (cond ((and string file) (error "Ambiguous call."))
-	    (string (net.xml.parser:parse-xml string :content-only t))
-	    (file   (with-open-file 
-		     (s file)
-		     (net.xml.parser:parse-xml s :content-only t))))
-    (declare (ignore xml))
-    (let ((needed '(("/XMLSchema" :net.xmp.schema "xsd")
-		    ("/XMLSchema-instance" :net.xmp.schema-instance "xsi")
-		    ("org/soap/envelope" :net.xmp.soap.envelope "SOAP-ENV")
-		    ("org/soap/encoding" :net.xmp.soap.encoding "SOAP-ENC")
-		    ("schemas.xmlsoap.org/wsdl" :net.xmp.wsdl "wsdl")
-		    ("/wsdl/soap" :net.xmp.wsdl.soap "wsdl-soap")
-		    ("/wsdl/soap12" :net.xmp.wsdl.soap "wsdl-soap12")))
-	  found nse nse-defs uri other missing (j 0))
-      (dolist (ns pns)
-	(setf uri (format nil "~A" (first ns)))
-	(dolist (n needed (push uri other))
-	  (let* ((item (first n)) (string uri)
-		 (k (length item)) 
-		 (l (length string))
-		 (i (search item string))
-		 m)
-	    (when (cond ((null i) nil)
-			((eql l (+ i k)) t)
-			((and (eql l (+ i k 1))
-			      (eql #\/ (elt string (1- l))))
-			 t))
-	      (cond ((setf m (assoc (first n) found :test #'equal))
-		     (push (first (last m)) ambi)
-		     (push uri ambi)
-		     (return))
-		    (t (setf needed (remove n needed))
-		       (push (append n (list uri)) found)
-		       (return))))))
-	)
+    ("schemas.xmlsoap.org/wsdl" :net.xmp.wsdl "wsdl")
+    ("/wsdl/soap" :net.xmp.wsdl.soap "wsdl-soap")
+    ("/wsdl/soap12" :net.xmp.wsdl.soap "wsdl-soap12")
+    ))
 
-      (setf nse-defs
-	    (append
-	     (etypecase other-pk
-	       (null nil)
-	       (atom
-		 (or (find-package other-pk)
-		     (make-package other-pk :use nil))
-		 (mapcar #'(lambda (uri)
-			     (make-nsd other-pk 
-				       (format nil "tns~A" (incf j))
-				       uri))
-			 other))
-	       (cons ;; must be (:prefix prefix)
-		(setf other-pk (string (second other-pk)))
-		(mapcar #'(lambda (uri &aux tns pkn)
-			    (setf tns (string
-				       ;; to get the case right
-				       (read-from-string
-					(format nil ":~A~A" other-pk (incf j)))))
-			    (setf pkn (string
-				       (read-from-string
-					(format nil ":net.xmpns.~A" tns))))
-			    (or (find-package pkn) (make-package pkn :use nil))
-			    (make-nsd pkn tns uri))
-			other)))
-	     (mapcar #'(lambda (f) (make-nsd (second f) (third f) (fourth f))) found)
-	     ))
+(defparameter *wsdl-optional-namespaces*
+  '(
+    ("/XMLSchema-instance" :net.xmp.schema-instance "xsi")
+    ("org/soap/encoding" :net.xmp.soap.encoding "SOAP-ENC")
+    ("org/soap/envelope" :net.xmp.soap.envelope "SOAP-ENV")
+    ))
 
-      (dolist (n needed)
-	(if (member (second n) found :key #'second)
-	    nil
-	  (push n missing)))
-
-      (dolist (nse (append (when (and base-ns (nse-defs base-ns))
-			     (list base-ns))
-			   (list *soap-namespaces-a* *soap-namespaces-b*
-				 *soap-namespaces*
-				 *wsdl-1.1-namespaces*
-				 *wsdl-1.2-namespaces*
-				 *wsdl-default-namespaces*)))
-	(when (null missing) (return))
-	(dolist (m missing)
-	  (let ((n (member (second m) (nse-defs nse) :key #'nsd-package)))
-	    (when n
-	      (push (make-nsd (nsd-package (first n))
-			      (nsd-prefix (first n))
-			      (nsd-uri (first n)))
-		    nse-defs)
-	      (setf missing (remove m missing))))))
-
-      (setf nse (make-nse* nil nse-defs))
-
-      (values nse (if other-pk nil other) ambi missing))))
+(defun decode-wsdl-namespaces (&key string file uri (map :wsdl1-prefix))
+  (xmp-decode-namespaces :pns (xmp-extract-namespaces
+				  :string string :file file :uri uri)
+			    :needed *wsdl-needed-namespaces*
+			    :optional *wsdl-optional-namespaces*
+			    :known map))
 
 
 (defmethod wsdl-warn ((conn wsdl-file-connector) &rest fmt)

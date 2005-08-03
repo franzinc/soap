@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapval1.cl,v 2.2 2004/04/23 18:42:16 mm Exp $
+;; $Id: soapval1.cl,v 2.3 2005/08/03 05:09:48 layer Exp $
 
 ;; SOAP server example
 ;; This example may be submitted to the SOAP validator at http://www.soapware.org/
@@ -36,7 +36,7 @@
 
 
 ;;;
-;;; The validation page is at: http://validator.soapware.org/
+;;; The validation page was at: http://validator.soapware.org/
 ;;;     
 ;;;  1. Sart the Lisp server
 ;;;  2. Go to the validation page
@@ -45,18 +45,19 @@
 ;;;
 ;;; Top level functions:
 ;;;  
-;;;  make-validator1-server &optional port
+;;;  make-validator1-server &key port
 ;;;  try-validator1 &key index port host path
 
+(define-namespace :keyword "vv" "http://validator.soapware.org")
 
 (define-soap-element nil "countTheEntities" 
-  '(:complex (:seq (:element "s" enc:|string|))))
+  '(:complex (:seq (:element "s" xsd:|string|))))
 
 (define-soap-element nil "countTheEntitiesResponse"
   '(:complex
     (:seq
      (:element
-      "struct"
+      "struct1"
       (:complex
        (:seq
 	(:element "ctLeftAngleBrackets" enc:|int|)
@@ -82,14 +83,14 @@
   '(:complex (:seq (:element "number" (:simple enc:|int|)))))
 
 
-(define-soap-element nil :|myStruct|
+(define-soap-element nil :|myStruct1|
   '(:complex (:seq* (:element nil (:complex (:seq* (:any)))))))
 
 (define-soap-element nil "echoStructTest"
-  '(:complex (:seq :|myStruct|)))
+  '(:complex (:seq :|myStruct1|)))
 
 (define-soap-element nil "echoStructTestResult"
-  '(:complex (:seq :|myStruct|)))
+  '(:complex (:seq :|myStruct1|)))
 
 
 (define-soap-element nil "manyTypesTest"
@@ -106,7 +107,7 @@
   '(:complex
     (:seq
      (:element
-      "Result"
+      "Result1"
       (:array
        xsd:|ur-type|
        :array-item  (:element "item" :send-type t :argument :type-and-arg)
@@ -121,14 +122,14 @@
   '(:complex (:seq (:element "myArray" (:array xsd:|string|)))))
 
 (define-soap-element nil "moderateSizeArrayCheckResult"
-  '(:complex (:seq (:element "result" (:simple enc:|string|)))))
+  '(:complex (:seq (:element "result2" (:simple xsd:|string|)))))
 
 
 (define-soap-element nil "nestedStructTest"
   '(:complex
     (:seq
      (:element
-      :|myStruct|
+      :|myStruct2|
       (:complex
        (:seq*
 	(:element
@@ -154,7 +155,7 @@
 		       )))))))))))))))
 
 (define-soap-element nil "nestedStructTestResult"
-  '(:complex (:seq (:element "result" (:simple enc:|int|)))))
+  '(:complex (:seq (:element "result3" (:simple enc:|int|)))))
 
 
 
@@ -165,7 +166,7 @@
   '(:complex
     (:seq
      (:element
-      "struct"
+      "struct2"
       (:complex
        (:seq (:element "times10" enc:|int|)
 	     (:element "times100" enc:|int|)
@@ -178,39 +179,27 @@
   '(:complex
     (:seq
      (:element
-      "struct"
+      "struct3"
       (:complex
        (:seq
-	(:element "toolkitDocsUrl" enc:|string|)
-	(:element "toolkitName" enc:|string|)
-	(:element "toolkitVersion" enc:|string|)
-	(:element "toolkitOperatingSystem" enc:|string|)))))))
+	(:element "toolkitDocsUrl" xsd:|string|)
+	(:element "toolkitName" xsd:|string|)
+	(:element "toolkitVersion" xsd:|string|)
+	(:element "toolkitOperatingSystem" xsd:|string|)))))))
 
-(defvar *validator1-dns*
-  (list nil
-	(list :net.xmp.soap.envelope
-	      "SOAP-ENV"
-	      "http://schemas.xmlsoap.org/soap/envelope/")
-	(list :net.xmp.soap.encoding
-	      "SOAP-ENC"
-	      "http://schemas.xmlsoap.org/soap/encoding/")
-	(list :net.xmp.schema
-	      "xsd"
-	      "http://www.w3.org/1999/XMLSchema")
-	(list :net.xmp.schema-instance
-	      "xsi"
-	      "http://www.w3.org/1999/XMLSchema-instance")
-	))
 
 (defparameter *validator1-path* "/validator1")
 
-(defun make-validator1-server (&optional (port 8080))
-  (let ((s (soap-message-server
+(defun make-validator1-server (&key (port 8080) debug)
+  (let* ((host "localhost") (path *validator1-path*)
+	 (s (soap-message-server
 	     :start (list :port port) :enable :start
-	     :publish (list :path *validator1-path*)
+	     :publish (list :path path)
 	     :action :none
-	     :lisp-package :keyword
-	     :message-dns *validator1-dns*
+	     :lisp-package :keyword :soap-debug debug
+	     :url (format nil "http://~A:~A~A" host port path)
+	     :message-dns '(nil (:keyword))
+	     :decode-flag nil
 	     )))
 
     (soap-export-method s "countTheEntities" (list "s")
@@ -221,7 +210,7 @@
 			:lisp-name 'validator1-easy-struct
 			:return "easyStructTestResult")
     
-    (soap-export-method s "echoStructTest" (list :|myStruct|)
+    (soap-export-method s "echoStructTest" (list :|myStruct1|)
 			:lisp-name 'validator1-echo-struct
 			:return "echoStructTestResult")
 
@@ -234,7 +223,7 @@
 			:lisp-name 'validator1-array-check
 			:return "moderateSizeArrayCheckResult")
 
-    (soap-export-method s "nestedStructTest" (list :|myStruct|)
+    (soap-export-method s "nestedStructTest" (list :|myStruct2|)
 			:lisp-name 'validator1-nested-struct
 			:return "nestedStructTestResult")
 
@@ -248,7 +237,7 @@
 
     ;; Additonal tests not called from web validator
     (soap-export-method s "manyTypesTest2" 
-			(list "num" "bool" "state" "doub" "dat" "bin")
+			(list "num" "bool" "state" "doub" "dat" "bin" "qname")
 			:lisp-name 'validator1-many-types2
 			:return "manyTypesTestResult")
 
@@ -264,7 +253,7 @@
   (let ((client (soap-message-client :url (format nil "http://~A:~A~A"
 						  host port path)
 				     :lisp-package :keyword
-				     :message-dns *validator1-dns*
+				     :message-dns '(nil (:keyword))
 				     )))
     (flet ((call (this name &rest args)
 		 (cond
@@ -284,7 +273,7 @@
        (call 1 "easyStructTest"
 	     :|stooges| (list :|moe| 1 :|larry| 2 :|curly| 3))
        (call 2 "echoStructTest"
-	     :|myStruct|
+	     :|myStruct1|
 	     (list :|substruct0| (list :|moe| 1 :|larry| 2 :|curly| 3)
 		   :|substruct1| (list :|moe| 11 :|larry| 22 :|curly| 33)))
        (call 3 "manyTypesTest"
@@ -293,15 +282,18 @@
        (call 4 "moderateSizeArrayCheck"
 	     :|myArray| (list "a" "b" "c" "d"))
        (call 5 "nestedStructTest"
-	     :|myStruct|
+	     :|myStruct2|
 	     (list :|year2000|
 		   (list
 		    :|month04| (list :|day01| (list :|moe| 1 :|larry| 2 :|curly| 3)))))
        (call 6 "simpleStructReturnTest" :|myNumber| 123)
        (call 7 "whichToolkit")
+
        (call 8 "manyTypesTest2"
 	     :|num| 17 :|bool| t :|state| "a string" :|doub| 4.5 :|dat| 12345
-	     :|bin| "string to encode")
+	     :|bin| "string to encode"
+	     :|qname| 'net.xmp.soap.envelope:|Body|
+	     )
        ))))
 
 
@@ -315,7 +307,8 @@
   ;; Your handler must return a struct that contains five fields, all numbers: 
   ;;  ctLeftAngleBrackets,  ctRightAngleBrackets, ctAmpersands, ctApostrophes, ctQuotes. 
 
-  (list "struct"
+  (when (listp string) (setf string (apply #'concatenate 'string string)))
+  (list "struct1"
 	(list
 	 "ctLeftAngleBrackets"  (count #\< string)
 	 "ctRightAngleBrackets" (count #\> string)
@@ -330,11 +323,11 @@
 	(incf result item)
       (error "did not find element ~S" key))))
 
-(defun validator1-echo-struct (&key |myStruct|) 
-  (list :|myStruct| (soap-alist-to-plist |myStruct| t)))
+(defun validator1-echo-struct (&key |myStruct1|) 
+  (list :|myStruct1| (soap-alist-to-plist |myStruct1| t)))
 
 (defun validator1-many-types (&key |num| |bool| |state| |doub| |dat| |bin|)
-  (list "Result"
+  (list "Result1"
 	(list
 	 (list 'xsd:|int|      |num|)
 	 (list 'xsd:|boolean|  |bool|)
@@ -345,14 +338,14 @@
 	 )))
 
 (defun validator1-array-check (&key |myArray|)
-  (list "result"
+  (list "result2"
 	(concatenate 'string
 		     (aref |myArray| 0)
 		     (aref |myArray| (1- (length |myArray|))))))
 
-(defun validator1-nested-struct (&key |myStruct|)
-  (list "result"
-	(let* ((year (assoc :|year2000| |myStruct|))
+(defun validator1-nested-struct (&key |myStruct2|)
+  (list "result3"
+	(let* ((year (assoc :|year2000| |myStruct2|))
 	       (april (assoc :|month04| (cdr year)))
 	       (day   (assoc :|day01| (cdr april)))
 	       (moe   (second (assoc :|moe| (cdr day))))
@@ -362,18 +355,17 @@
 
 
 (defun validator1-struct-return (&key |myNumber|)
-  (list :|struct|
+  (list :|struct2|
 	(list :|times10| (* 10 |myNumber|) 
 	      :|times100| (* 100 |myNumber|) 
 	      :|times1000| (* 1000 |myNumber|))))
   
 (defun validator1-toolkit ()
-  (list :|struct|
+  (list :|struct3|
 	(list :|toolkitDocsUrl| "http://franz.com"
 	      :|toolkitName|    "Allegro Common Lisp SOAP"
 	      :|toolkitVersion| "6.2"
 	      :|toolkitOperatingSystem| "Windows and Unix")))
-
 
 
 
@@ -389,12 +381,16 @@
      (:element "state" xsd:|string|)
      (:element "doub"  xsd:|float|)
      (:element "dat"   xsd:|string|)
-     (:element "bin"   xsd:|string|))))
+     (:element "bin"   xsd:|string|)
+     (:element "qname" xsd:|QName|)     ;;; test [bug15454]
+     )))
 (define-soap-type nil :struct-of-2 '(:complex (:set (:element "foo" xsd:|string|)
 						    (:element "bar" xsd:|string|))))
 
-(defun validator1-many-types2 (&key |num| |bool| |state| |doub| |dat| |bin|)
-  (list "Result"
+(defun validator1-many-types2 (&key |num| |bool| |state| |doub| |dat| |bin|
+				    |qname|
+				    )
+  (list "Result1"
 	(list
 	 (list 'xsd:|int|      |num|)
 	 (list 'xsd:|boolean|  |bool|)
@@ -404,6 +400,8 @@
 	 (list 'xsd:|string|       |bin|)
 	 (list :struct-of-2
 	       (list :foo "abc" :bar "def"))
+	 (list 'xsd:|string| (format nil "~S" |qname|))
+	 (list 'xsd:|QName| |qname|)
 	 )))
 
 

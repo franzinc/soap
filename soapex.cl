@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapex.cl,v 2.2 2004/04/23 18:42:16 mm Exp $
+;; $Id: soapex.cl,v 2.3 2005/08/03 05:09:48 layer Exp $
 
 ;; SOAP client examples
 
@@ -35,27 +35,14 @@
 
 
 
-(defun sp01 ()
+;; This service does not seem to ever work
+(defun sp01 (&key (debug *soap-client-debug*))
 
   ;; Sometimes fails: "getCurrentTime" not defined (may be server problem).
 
-  (let ((conn (soap-message-client 
+  (let* ((conn (soap-message-client 
 	       :url "http://time.soapware.org/currentTime"
-	       :message-dns
-	       (list nil
-		     (list :net.xmp.soap.envelope
-			   "SOAP-ENV"
-			   "http://schemas.xmlsoap.org/soap/envelope/")
-		     (list :net.xmp.soap.encoding
-			   "SOAP-ENC"
-			   "http://schemas.xmlsoap.org/soap/encoding/")
-		     (list :net.xmp.schema
-			   "xsd"
-			   "http://www.w3.org/1999/XMLSchema")
-		     (list :net.xmp.schema-instance
-			   "xsi"
-			   "http://www.w3.org/1999/XMLSchema-instance")
-		     )
+	       :soap-debug debug
 	       )))
     (values-list
      (append
@@ -68,13 +55,14 @@
       (list conn)))))
 
 (defpackage :temp (:use) (:export "getTemp"))
-(defun sp10 (&optional (zip "98325"))
+(define-namespace :temp "temp" "urn:xmethods-Temperature")
+(defun sp10 (&key (zip "98325") (debug *soap-client-debug*))
 
   ;; http://www.xmethods.net/sd/2001/TemperatureService.wsdl
 
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword
-	       :decode-flag nil
+	       :decode-flag nil :soap-debug debug
 	       :url "http://services.xmethods.net:80/soap/servlet/rpcrouter")))
     (values-list
      (append
@@ -83,8 +71,7 @@
 	conn '(:element temp:|getTemp|
 			(:complex (:seq (:element "zipcode" xsd:|string|))
 				  :action ""
-				  :namespaces
-				  (nil (:temp "tns" "urn:xmethods-Temperature"))
+				  :namespaces (nil (:temp))
 				  ))
 	:|zipcode| zip
 	))
@@ -93,7 +80,7 @@
 
 
 
-
+;; This service does not seem to be there any more
 ;; http://webservices.empowered.com/statsws/stats.asmx
 ;; http://www.xignite.com/xstatistics.asmx?WSDL
 
@@ -101,11 +88,13 @@
 			      "GetTeams"
 			      "GetPlayers"
 			      ))
-(defun sp21 (&optional (encoding (list :utf8-base :utf-8)))
+(define-namespace :baseball nil "http://webservices.empowered.com/StatsWS/DataService")
+
+(defun sp21 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8)))
 
   (let ((conn (soap-message-client 
 	       :url "http://webservices.empowered.com/statsws/stats.asmx"
-	       :encoding-style nil
+	       :encoding-style nil :soap-debug debug
 	       :xml-encoding encoding 
 	       )))
     (values-list
@@ -118,21 +107,17 @@
 		(:seq)
 		:action
 		"http://webservices.empowered.com/StatsWS/DataService/GetTeams"
-		:namespaces
-		("http://webservices.empowered.com/StatsWS/DataService"
-		  (:baseball
-		   nil
-		   "http://webservices.empowered.com/StatsWS/DataService" ))
+		:namespaces (:baseball)
 		))))
       (list conn)))))
 
-(defun sp22 (&optional (encoding (list :utf8-base :utf-8)))
+(defun sp22 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8)))
 
   ;;  sending message nearly identical to sample on web
 
   (let ((conn (soap-message-client 
 	       :url "http://webservices.empowered.com/statsws/stats.asmx"
-	       :encoding-style nil
+	       :encoding-style nil :soap-debug debug
 	       :xml-encoding encoding
 	       )))
     (values-list
@@ -145,11 +130,7 @@
 		(:seq)
 		:action
 		"http://webservices.empowered.com/StatsWS/DataService/GetPlayers"
-		:namespaces
-		("http://webservices.empowered.com/StatsWS/DataService"
-		  (:baseball
-		   nil
-		   "http://webservices.empowered.com/StatsWS/DataService" ))
+		:namespaces (:baseball)
 		))))
       (list conn)))))
 
@@ -161,9 +142,9 @@
 (define-soap-element nil
   'temp:|getRateResponse|
   '(:complex (:seq (:element "Result" xsd:|float|))))
-(defun sp30 (&optional (country1 "Canada") (country2 "USA"))
+(defun sp30 (&key (debug *soap-client-debug*) (country1 "Canada") (country2 "USA"))
   (let ((conn (soap-message-client 
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug
 	       :url "http://services.xmethods.net:80/soap")))
     (values-list
      (append
@@ -190,9 +171,9 @@
 (defpackage :temp (:use) (:export "getVersion" "Result"))
 (define-soap-element nil "getVersionResponse"
   '(:complex (:seq (:element "Result" xsd:|string|))))
-(defun sp40 ()
+(defun sp40 (&key (debug *soap-client-debug*))
   (let ((conn (soap-message-client 
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug
 	       :url "http://arcweb.esri.com/services/v2/RouteFinder")))
     (values-list
      (append
@@ -210,7 +191,7 @@
 
 
 
-
+;; This service does not seem to be there any more.
 ;; http://icuisine.net/webservices/RecipeService.asmx
 
 (defpackage :temp (:use) (:export "SearchRecipes" "SearchRecipesResponse"
@@ -239,9 +220,9 @@
 					   "Ingredients"
 					   ))))))))))))
 (define-soap-element nil "Ingredients" '(:complex (:seq* (:any))))
-(defun sp51 (&optional (criteria "fried eggplant") (pg 0))
+(defun sp51 (&key (debug *soap-client-debug*) (criteria "fried eggplant") (pg 0))
   (let ((conn (soap-message-client 
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug
 	       :xml-encoding (list :utf8-base :utf-8)
 	       :url "http://icuisine.net/webservices/RecipeService.asmx")))
     (values-list
@@ -266,9 +247,9 @@
 	))
       (list conn)))))
 
-(defun sp52 (id)
+(defun sp52 (&key (debug *soap-client-debug*) id)
   (let ((conn (soap-message-client 
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug
 	       :xml-encoding (list :utf8-base :utf-8)
 	       :url "http://icuisine.net/webservices/RecipeService.asmx")))
     (values-list
@@ -359,10 +340,11 @@
 (define-soap-type nil 'gg:|GoogleSearchResult| '(:complex (:seq* (:any))))
 (define-soap-type nil 'gg:|ResultElement| '(:complex (:seq* (:any))))
 (define-soap-type nil 'gg:|DirectoryCategory| '(:complex (:seq* (:any))))
-(defun gs (&optional (q "AllegroCL"))
+
+(defun gs (&key (debug *soap-client-debug*) (q "AllegroCL") (decode nil))
   (let ((conn (soap-message-client 
 	       :url "http://api.google.com/search/beta2"
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug  :decode-flag decode
 	       )))
     (values-list
      (append
@@ -381,10 +363,15 @@
       (list conn)))))
 
 
-(defun gsp (&optional (phrase "common lisp s-expresion"))
+(defun gsp (&key (debug *soap-client-debug*) (phrase "common lisp s-expresion")
+		 (decode nil))
+  
+  ;; This example will cause a warning message since the result element
+  ;; gg:|doSpellingSuggestionResponse| is undefined.
+
   (let ((conn (soap-message-client 
 	       :url "http://api.google.com/search/beta2"
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug :decode-flag decode
 	       )))
     (values-list
      (append
@@ -397,10 +384,14 @@
       (list conn)))))
 
 
-(defun gcp (&key (url "http://www.franz.com"))
+(defun gcp (&key (debug *soap-client-debug*) (url "http://www.franz.com") (decode nil))
+
+  ;; This example will cause a warning message since the result element
+  ;; gg:|doGetCachedPageResponse| is undefined.
+
   (let ((conn (soap-message-client 
 	       :url "http://api.google.com/search/beta2"
-	       :lisp-package :keyword
+	       :lisp-package :keyword :soap-debug debug  :decode-flag decode
 	       )))
     (values-list
      (append
@@ -414,88 +405,79 @@
 
 
 
-(defparameter *soap-dns* 
-  (list nil
-	 (list :net.xmp.schema-instance
-	       "xsi"
-	       "http://www.w3.org/2001/XMLSchema-instance")
-	 (list :net.xmp.schema
-	       "xsd"
-	       "http://www.w3.org/2001/XMLSchema")
-	 (list :net.xmp.soap.envelope
-	       "soap"
-	       "http://schemas.xmlsoap.org/soap/envelope/")
-	 (list :net.xmp.soap.encoding
-	       "SOAP-ENC"
-	       "http://schemas.xmlsoap.org/soap/encoding/")
-	 ))
+
 (defpackage :ts (:use))
+(define-namespace :ts "ts" "urn:tsNamespace")
 (define-soap-element nil "testServer"
-  '(:complex (:seq* (:any))
+  '(:complex (:seq (:element "a" xsd:|string|)
+		   (:element "b" xsd:|string|)
+		   (:element "c" xsd:|string|)
+		   )
 	     :action "ACLSOAP"
 	     ))
-(define-soap-element nil 'ts::testServer1
-  '(:complex (:seq* (:any))
+(define-soap-element nil 'ts::|testServer1|
+  '(:complex (:seq (:element "a" xsd:|string|)
+		   (:element "b" xsd:|string|)
+		   (:element "c" xsd:|string|)
+		   )
 	     :action "ACLSOAP"
-	     :namespaces '(nil (:ts "ts" "tsNamespace"))
+	     :namespaces (nil (:ts))
 	     ))
-(define-soap-element nil 'ts::testServer2
-  '(:complex (:seq* (:any))
+(define-soap-element nil 'ts::|testServer2|
+  '(:complex (:seq (:element "a" xsd:|string|)
+		   (:element "b" xsd:|string|)
+		   (:element "c" xsd:|string|)
+		   )
 	     :action "ACLSOAP"
-	     :namespaces '("tsNamespace" (:ts "ts" "tsNamespace"))
+	     :namespaces (nil (:ts))
 	     ))
 
 (defun simple-server (&key (port 4567)
 			   (server-action "ACLSOAP")
 			   (method-action :default)
-			   (client-action server-action) 
-			   (ns 0)
-			   verbose
+			   (ns 0) debug
 			   ) 
-  (unwind-protect
-      (let* ((host "localhost")
-	    (path "/ACL-SOAP")
-	    (ns (case ns ((0 1 2) ns) (otherwise 0)))
-	    (message (elt '("testServer" ts::|testServer1| ts::|testServer2|) ns))
-	    (reply   (elt '(:|sResponse|  ts::|sResponse1|   ts::|sResponse2|) ns)) 
-	    (msgns   (elt '(nil
-			    (nil (:ts "ts" "tsNamespace"))
-			    ("tsNamespace" (:ts "ts" "tsNamespace")))
-			  ns))
-	    )
-	(when verbose
-	  (trace net.xml.parser:parse-xml))
-	(let ((s (soap-message-server
-		  :start (list :port port) :enable :start
-		  :publish `(:path ,path)
-		  :action server-action
-		  :lisp-package :keyword
-		  :message-dns (append (list nil) (cdr msgns) (cdr *soap-dns*))
-		  )))
+  (let* ((host "localhost")
+	 (path "/ACL-SOAP")
+	 (url (format nil "http://~A:~A~A" host port path))
+	 (ns (case ns ((0 1 2) ns) (otherwise 0)))
+	 (message (elt '("testServer" ts::|testServer1| ts::|testServer2|) ns))
+	 (reply   (elt '(:|sResponse|  ts::|sResponse1|   ts::|sResponse2|) ns)) 
+	 (msgns   (elt '(nil
+			 (nil (:ts))
+			 ("tsNamespace" (:ts)))
+		       ns))
+	 )
+    (let ((s (soap-message-server
+	      :start (list :port port) :enable :start
+	      :publish `(:path ,path)
+	      :action server-action
+	      :lisp-package :keyword :soap-debug debug
+	      :message-dns msgns
+	      :url url
+	      )))
 
-	  (soap-export-method s message (list :|a| :|b| :|c|)
-			      :lisp-name 'simple-server-1
-			      :action method-action
-			      :return `(:element ,reply
-						 (:simple xsd:|string|
-							  :namespaces ,msgns)))
-	  (sleep 1))
+      (soap-export-method s message (list  :|a| :|b| :|c|)
+			  :lisp-name 'simple-server-1
+			  :action method-action
+			  :return `(:element ,reply
+					     (:complex
+					      (:seq
+					       (:element "result" xsd:|string|))
+					      :namespaces ,msgns)))
+      (sleep 1)
     
-	(let ((c (soap-message-client :url (format nil "http://~A:~A~A"
-						   host port path)
-				      :lisp-package :keyword
-				      )))
-	  (equal
-	   (list reply "123")
-	   (call-soap-method c 
-			     `(:element ,message
-					(:complex (:seq* (:any))
-						  :action ,client-action
-						  :namespaces ,msgns
-						  ))  
-			     "a" 1 "b" 2 "c" 3))))
-    (when verbose
-      (untrace net.xml.parser:parse-xml))))
+      (let ((c (soap-message-client :url url
+				    :lisp-package :keyword :soap-debug debug
+				    )))
+	(values
+	 (equal "123"
+		(soap-result-string c
+				    (call-soap-method c message  
+						      "a" 1 "b" 2 "c" 3)
+				    reply :|result|))
+	 s c)))))
 
-(defun simple-server-1 (&key |a| |b| |c|) (concatenate 'string |a| |b| |c|))
+(defun simple-server-1 (&key |a| |b| |c|)
+  (list "result" (concatenate 'string |a| |b| |c|)))
 

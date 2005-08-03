@@ -1,3 +1,174 @@
+2005-07-13  Kevin Layer  <layer@gemini>
+
+	* Makefile: add more files to soap.002 patch
+
+2005-07-08  Kevin Layer  <layer@gemini>
+
+	* Makefile: soap.002
+	* build.cl: soap.002
+	* soap.cl: soap.002
+
+2005-07-08    <mm@PROA>
+
+	* soapval1.cl: add more data types to manyTypesTest2
+	* xmp-base.cl (xmp-encode-attribute): default ns does not apply to attributes
+	                                       [bug15443]
+	* xmp-base.cl (xmp-decode-body): revised to combine  string fragments into
+	                         a single string before calling xmp-simple-content
+	* xmp-base.cl (xmp-warning): signal true warning
+	* xmp-base.cl (*xmp-compare-uri*): NEW exported var default nil, may be #\/
+	* xmp-base.cl (def-xmp-sub-classes): NEW macro to define all xmp-connector
+	                           subclasses
+	* xmp-base.cl (xmp-complex-content): call xmp-note-attributes to save
+	                           all element attributes in hashtable
+	* xmp-base.cl (xmp-define-namespace-map): allow uri in default slot
+	* xmp-aserve.cl (xmp-message-send): send additional headers and add initargs for
+	                          aserve http arguments [rfe6233]
+	* xmp-aserve.cl ("xmp-aserve"): use def-xmp-sub-classes
+	* xmp-schema.cl (schema-component-name): add default method for schema-component
+	* xmp-soap.cl (soap-result-internal): resolve multirefs [rfe6169]
+	* xmp-soap.cl (soap-get-attributes): new fn [rfe6196]
+	* xmp-soap.cl ("soap"): use def-xmp-sub-classes
+	        (soap-result-string): NEW function
+	* xmp-soap.cl (enc:): add defs for most Schema types
+	* xmp-soap.cl (soap-encode-element): look for option :computed-attributes
+	                           on type options and call a function
+	* xmp-soap.cl (soap-connector): add soap-body-form slot
+	                         values are :one or :many   [rfe6217]
+	* xmp-soap.cl (xmp-call-method): peek at reply and signal error if 
+			                 definitely not an XML string
+		     (call-soap-method): return a third value [rfe6217 partial]
+	                                   - list of ALL Body elements
+		(soap-server-connector): add server-message-body slot to hold list
+	                                  of body elements
+	  (soap-encode-parts-to-object): new function used by server-implementation
+	             (call-soap-method): signal error when result is soap fault
+	* xmp-soap.cl (soap-result-part): new accessor for result from call-soap-method
+	              (soap-result-only): new accessor for result from call-soap-method 
+	* xmp-wsdl.cl (encode-wsdl-file): do not emit decl for pre-def type [bug15454]
+              	   (wsdl-make-interface): add send-atype and send-asize options
+	* xmp-wsdl.cl (wsdl-emit-object-classes): collect all types first
+	                    before generating code
+		      (wsdl-emit-object-classes): generate new-xxx for arrays
+	* xmp-wsdl.cl (wsdl-emit-object-classes): encode and decode recursively
+	* xmp-wsdl.cl (wsdl-compose-name): new function to make prettier case-portable
+	                                   names
+		    (wsdl-make-interface): add compose keyword
+		    (wsdl-emit-object-classes): new function to emit defclasses for
+		                             soap structs
+	* xmp-wsdl.cl (wsdl-make-interface): try to anticipate case-mode problems
+	* xmp-wsdl.cl (wsdl-file-connector): add wsdl-url-name slot
+	* xmp-wsdl.cl (wsdl-do-element): need to rename overloaded operations
+	* xmp-wsdl.cl (wsdl-make-interface): add :text argument
+	              (wsdl-bind-operation): try to resolve overloaded opeations
+	* xmp-wsdl.cl (wsdl-define-type): allow
+	                   (:simple-type (:simple-content (:extension)))
+	* xmp-test.cl (test-soap-local): new test functions	
+	* bignum-server.cl: revise for case portability
+	* soapex.cl (simple-server): revise for case portability
+	* soapex.cl (sp01): mark some services as unavailable
+
+
+2005-05-02  Kevin Layer  <layer@gemini>
+
+	* Makefile: 1st 7.0 patch rule
+	* build.cl: patch
+	* soap.cl: patch v1
+
+2005-04-29    <mm@PROA>
+
+	* xmp-base.cl (xmp-copy): copy base-dns slot
+	* xmp-base.cl (xmp-assoc): new function
+	* xmp-base.cl: delete xmp-make-connector
+	* xmp-base.cl (xmp-getf-in-def): new fn - look for options in named type defs
+	                                 as well
+	* xmp-aserve.cl (xmp-start-server): fix misspelled :server arg to aserve:start
+	* xmp-soap.cl (xmp-server-implementation): set message info in server
+	                   before calling soap-invoke-method
+		export soap-server-message-method -return -signature -action accessors
+	        NEED DOC UPDATE
+	* xmp-soap.cl (soap-encode-element): use xmp-getf-in-def and look
+	                   in :element options as well
+	* xmp-soap.cl (soap-sub-element-content): generalize arglist
+	                    item pattern &rest more-patterns (for recursive search)
+		NEED DOC UPDATE
+	* xmp-soap.cl (soap-message-client): add class argument
+	                   delete xmp-make-connector
+	* xmp-soap.cl (soap-encode-message): lokk for type def as method last
+	* xmp-soap.cl (xmp-call-method): use xmp-getf-in-def instead of xmp-getf-in-part
+	                                 when looking for action option
+	* xmp-wsdl.cl: fix modeline
+	    (wsdl-do-element): look for part with defined type instead of
+	                       defined element
+
+2005-01-13  Steve Haflich  <smh@bach>
+
+	* xmp-wsdl.cl: Fix wrong package in emacs mode line.
+
+2004-10-08    <mm@KETCHTOO>
+	
+	* README.txt: revised
+	* bignum-server.cl: NEW FILE example code
+	* xmp-base.cl (delete-namespace): revised def
+	* xmp-base.cl (xmp-parse-message): look for vacuous package or uri decls
+	* xmp-wsdl.cl (wsdl-make-interface): add :map arg for wsdl-map-name slot
+	* xmp-wsdl.cl (wsdl-bind-operation): simplify generated client and server defuns
+	* xmp-schema.cl (schema-element-name): new fn
+	* xmp-soap.cl (xmp-server-implementation): refine debug info
+	* xmp-test.cl: add interface to xmethods
+
+	
+2004-10-05    <mm@KETCHTOO>
+
+	* xmp-base.cl: fix default features
+	* RELNOTES: summarize 7.0 changes
+
+	
+2004-10-05    <mm@KETCHTOO>
+
+	* xmp-soap.cl (soap-encode-element): allow :send-type t
+	               (soap-connector): add slot and :send-type initarg
+	* xmp-soap.cl (soap-encode-message): method argument may be a type name
+	      to allow message body with several elements
+	* xmp-soap.cl: totally revamped namespace handling
+	* xmp-wsdl.cl: totally revamped namespace handling
+	* xmp-wsdl.cl (wsdl-make-interface): 
+	   DOC CHANGE: eval defaults to nil, not linked to expand-singleton
+	* xmp-wsdl.cl (decode-wsdl-namespaces): add optional namespaces
+	                       look in list of base namespaces for other
+			       than needed
+	* xmp-wsdl.cl (encode-wsdl-file): add missing comma in backquote [spr29015]
+	* xmp-base.cl: totally revamped namespace handling
+	* xmp-base.cl: add features :soap-sax :soap-lxml :soap-pxml
+	* xmp-base.cl (xmp-decode): add Return to ignorable whitespace list (sax)
+	* xmp-base.cl: do not call pxml-version in 7.0
+	   (xmp-decode-qualified-name): special treatment for names like xmlxx:yy (sax)
+	* xmp-aserve.cl (xmp-header-slot): remove string quotes [spr29245]
+	* xmp-schema.cl: revised data structures generated during schema analysis
+	* xmp-schema.cl (schema-ignored-part): new macro
+	* xmp-schema.cl (schema-collect-target): name may be string or symbol
+	         (schema-decode-attribute): attr name may be string or symbol
+	* xmp-test.cl: add testing instructions
+	* soapex.cl: add debug option to test functions
+	             revise namespace constants
+	* soapex.cl (gcp): add comment about undefined warning
+	* soapval1.cl (make-validator1-server): add debug option to test function
+	                         drop namespace constant
+	* soapval1.cl (validator1-many-types2): new test
+
+
+2004-08-16  Kevin Layer  <layer@gemini>
+
+	* Makefile: add to `clean'
+
+2004-05-11  Kevin Layer  <layer@gemini>
+
+	* build.cl,
+	* soap.cl: update defpatch's
+	* xmp-soap.cl: fix warning
+	* xmp-wsdl.cl: fix warning
+	* Makefile: patch 004
+
 *******************************************************************************
 join from acl62 to trunk on 2/12/04
 next join tag: use join2.sh
@@ -165,4 +336,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.5 $
+$Revision: 2.6 $

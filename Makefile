@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.1 2004/02/13 05:35:28 layer Exp $
+# $Id: Makefile,v 2.2 2005/08/03 05:09:48 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -43,62 +43,27 @@ DIST: FORCE
 	cp -p soapex.cl DIST/examples/soap
 	cp -p soapval1.cl DIST/examples/soap
 
-## 6.2 patch version 003:
-patch-dist: FORCE
-	rm -fr DIST DIST.src
-	mkdir DIST \
-	      DIST/code
-	cp -p soap.fasl DIST/code/soap.003
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.003
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.003
-
-## 6.2 patch version 002:
-patch-dist.002: FORCE
-	rm -fr DIST DIST.src
-	mkdir DIST DIST.src \
-	      DIST.src/examples \
-	      DIST.src/examples/soap \
-	      DIST.src/doc \
-	      DIST/code
-	cp -p soap.fasl DIST/code/soap.002
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.002
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.002
-	cp -p ../../html6/soap.htm DIST.src/doc
-	cp -p soapex.cl DIST.src/examples/soap
-	cp -p soapval1.cl DIST.src/examples/soap
-
-## 6.2 patch version 001:
+## 7.0 patch version 001:
 patch-dist.001: FORCE
 	rm -fr DIST DIST.src
-	mkdir DIST DIST.src \
-	      DIST.src/examples \
-	      DIST.src/examples/soap \
-	      DIST.src/doc \
+	mkdir DIST \
 	      DIST/code
 	cp -p soap.fasl DIST/code/soap.001
 	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.001
 	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.001
-	cp -p ../../html6/soap.htm DIST.src/doc
-	cp -p soapex.cl DIST.src/examples/soap
-	cp -p soapval1.cl DIST.src/examples/soap
 
-## 6.2 patch version 000
-patch-dist.000: FORCE
+## 7.0 patch version 002:
+patch-dist: FORCE
 	rm -fr DIST DIST.src
-	mkdir DIST DIST.src \
-	      DIST.src/examples \
-	      DIST.src/examples/soap \
-	      DIST.src/doc \
-	      DIST/code
-	cp -p soap.fasl DIST/code/soap.fasl
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.fasl
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.fasl
-	cp -p ../xmlutils/pxml.fasl DIST/code/pxml.001
-	cp -p ../../html6/soap.htm DIST.src/doc
-	cp -p soapex.cl DIST.src/examples/soap
-	cp -p soapval1.cl DIST.src/examples/soap
+	mkdir DIST DIST/code DIST/examples DIST/examples/soap
+	cp -p soap.fasl DIST/code/soap.002
+	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.002
+	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.002
+	cp -p soapex.cl DIST/examples/soap
+	cp -p soapval1.cl DIST/examples/soap
+	cp -p bignum-server.cl DIST/examples/soap
 
 clean: FORCE
-	rm -fr *.fasl *.out DIST DIST.src
+	rm -fr *.fasl *.out DIST DIST.src soap[am].cl
 
 FORCE:
