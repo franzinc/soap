@@ -1,3 +1,7 @@
+2005-08-19  Martin Mikelsons  <mm@gemini>
+
+	* xmp-soap.cl (soap-version): fix format strings [bug15543] 
+
 2005-07-13  Kevin Layer  <layer@gemini>
 
 	* Makefile: add more files to soap.002 patch
@@ -336,4 +340,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.6 $
+$Revision: 2.7 $

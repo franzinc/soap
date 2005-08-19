@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.5 2005/08/03 05:09:48 layer Exp $
+;; $Id: xmp-soap.cl,v 2.6 2005/08/19 19:29:51 mm Exp $
 
 ;; SOAP support
 
@@ -55,11 +55,11 @@
 				(< (third *soap-version*) v3)))))
 		 (if error-p
 		     (error
-		      "SOAP Module Version ~A.~A.~A needed, but ~{~A.~A.~A~} is loaded."
+		      "SOAP Module Version ~A.~A.~A needed, but loaded version is ~{~A.~}"
 		      v1 (or v2 0) (or v3 0) *soap-version*)
 		   nil)
 	       *soap-version*))
-    (otherwise (format v1-or-s "SOAP Module Version ~{~A.~A.~A~}" *soap-version*))))
+    (otherwise (format v1-or-s "SOAP Module Version ~{~A.~}" *soap-version*))))
     
 (eval-when (compile load eval)
   (defparameter *soap-case-mode* (soap-case-mode))
