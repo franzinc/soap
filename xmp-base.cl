@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.4 2005/08/03 05:09:48 layer Exp $
+;; $Id: xmp-base.cl,v 2.5 2005/09/06 17:10:28 layer Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -26,7 +26,7 @@
 
 ;; FEATURES
 ;;   :soap-sax   - use native SAX parser API
-;;   :soap-lxml  - use PXML-on-SAX parser
+;;   :soap-lxml  - use LXML-on-SAX parser
 ;;   :soap-pxml  - use old PXML parser
 
 ;; pick a default if no features present at all
@@ -41,17 +41,11 @@
 
 (eval-when (compile load eval) 
   #-soap-pxml (require :sax)
-  #+soap-lxml (require :pxml-sax)
   #+soap-pxml (require :pxml)
 
   (require :aserve)
   )
 
-(defpackage :net.xmp
-  (:use :common-lisp 
-	#+soap-lxml :excl :net.xml.parser
-	#+soap-pxml :excl :net.xml.parser
-	))
 
 #+soap-pxml (eval-when (compile load eval) (pxml-version 7 nil nil t))
 
@@ -258,6 +252,7 @@
    xnm-name xnm-read-only xnm-default xnm-entries xnm-tail
    xmp-get-attribute
    xmp-get-attributes
+   xmp-search-map
 
    ;; Ordinary functions
    encode-base64-string
@@ -458,6 +453,11 @@
      :accessor xmp-trim-whitespace :initarg :trim-whitespace :initform nil)
 
     (debug            :accessor xmp-debug :initarg :debug :initform *xmp-debug*)
+    (nillable         :accessor xmp-nillable
+		      ;;  :ignore    -> ignore nillable and nil attributes
+		      ;;  :strict    -> must be declared in element def
+		      ;;  :accept    -> do not look for declaration
+		      :initarg :nillable :initform :accept)
 
    ;;; INSTANCE SLOTS NOT-copied by xmp-copy
 
@@ -651,7 +651,18 @@
 		     defs)))
       )))
 
+(defun xmp-make-tables (fourth-p) 
+  (vector (make-hash-table :test #'eq)
+	  (make-hash-table :test #'equal)
+	  (make-hash-table :test #'equalp)
 
+	  (when fourth-p (make-hash-table :test #'eq))
+
+	  ))
+
+(defvar *defined-xmp-elements*
+  ;; Fourth element is Defined Types
+  (xmp-make-tables t))
     
 
 (defmethod xmp-decode-body ((conn xmp-string-in-connector) data-list
@@ -695,6 +706,23 @@
      (multiple-value-setq (elt attr) (xmp-element-parts conn data))
 
      (cond 
+      ((and elt attr
+	    (case (xmp-nillable conn)
+	      (:accept t)
+	      (:ignore nil)
+	      (:strict
+	       (xmp-lookup *defined-xmp-elements* elt elt nil :attribute :nillable)))
+	    ;; partial solution to [bug15528] 
+	    (let ((nillable (do ((tl attr (cddr tl)))
+				((atom tl) nil)
+			      (when (or (eq (first tl)
+					    (intern "nil" :net.xmp.schema-instance))
+					(equal "nil" (string (first tl))))
+				(return tl)))))
+	      (when nillable
+		(and (or (equalp "true" (second nillable))
+			 (equal "1" (second nillable)))
+		     (null data))))))
       ((or cdi (xmp-any-cpart conn exel))
        (cond ((and elt 
 		   (if cdi (xmp-test-complex-def conn cdi elt) t))
@@ -718,6 +746,10 @@
 
 		(when vals (setf content-list (nconc content-list vals))
 		      (when type (push type type-list))))
+	     ((and elt cdi)  ;;; [bug15502] refine the error message
+	      (xmp-error conn :client 
+			 :string (list "Expected: ~S  Found element: ~S" 
+				       (xmp-cdi-def cdi) elt)))
 	     ((and (stringp data) trim 
 		   (cond ((equal "" (string-trim trim data))
 			  (setf data nil)
@@ -725,7 +757,9 @@
 			 (elt nil)
 			 (t t)))
 	      (when data (collect-simple strt data)))
-	     (t (error "Non-blank string data in complex context ~S" data))
+	     (t (xmp-error
+		 conn :client 
+		 :string (list "Non-blank string data in complex context ~S" data)))
 	     ))
       ((and (stringp data)
 	    (when exel (if (atom exel)
@@ -737,8 +771,8 @@
 	       (setf data (concatenate 'string data d))
 	       (pop data-list)))
        (collect-simple simple data))
-      (t (xmp-error conn :client :string (list "Expected: ~S  Found: ~S" 
-					       (if cdi (xmp-cdi-def cdi) exel) data))))))
+      (t (xmp-error conn :client :string (list "Expected: ~S  Found content: ~S" 
+					       exel data))))))
   )
   (values content-list (nreverse type-list))
 
@@ -2074,24 +2108,27 @@
 	 (pk (or (xmp-default-package conn nss) (xmp-lisp-package conn)))
 	 (*package* (resolve-package pk)))
     (multiple-value-bind (xml ns)
-	(parse-xml source
-		   :content-only t
-		   :uri-to-package
-		   (mapcar #'(lambda (d)
-			       (cons (xmp-resolve-uri
-				      (let ((uri (nsd-uri d)))
-					(or (cond ((null uri) nil)
-						  ((equal uri "") nil)
-						  (t uri))
-					    (error "Cannot use namespace declaration ~A"
-						   d))))
-				     (resolve-package 
-				      (let ((pk (nsd-package d)))
-					(or pk
-					    (error "Cannot use namespace declaration ~A"
-						   d))))))
-			   (nse-defs nil :more nss :one :uri))
-		   )
+	(
+	 #+soap-pxml net.xml.parser:parse-xml
+	 #+soap-lxml net.xml.sax:parse-to-lxml	     
+	 source
+	 :content-only t
+	 :uri-to-package
+	 (mapcar #'(lambda (d)
+		     (cons (xmp-resolve-uri
+			    (let ((uri (nsd-uri d)))
+			      (or (cond ((null uri) nil)
+					((equal uri "") nil)
+					(t uri))
+				  (error "Cannot use namespace declaration ~A"
+					 d))))
+			   (resolve-package 
+			    (let ((pk (nsd-package d)))
+			      (or pk
+				  (error "Cannot use namespace declaration ~A"
+					 d))))))
+		 (nse-defs nil :more nss :one :uri))
+	 )
       (setf (xmp-message-pns conn) ns)
       xml)))
 
@@ -2234,10 +2271,10 @@
      (or entry
 	 (xmp-lookup
 	  table name name nil
-	  (setf item
-		;; add the new item at the end so lookup is
-		;;  in the same order as exports
-		(nconc item (list (setf entry (list sig)))))))
+	  :value (setf item
+		       ;; add the new item at the end so lookup is
+		       ;;  in the same order as exports
+		       (nconc item (list (setf entry (list sig)))))))
      
      ;; table-entry -> (sig return-type lisp-name enabled help-string . properties)
 
@@ -2444,24 +2481,23 @@
 	(ecase top-coll
 
 	  ((:seq :seq*)
-	   (if* (null ftail)
-		then
-		;; If all the elements are used up, 
-		;;    this pattern remains on the stack.
-		(setf res :done)
-		else
-		(do ((tl top-tail (cdr tl)))
-		    ((atom tl)
-		     ;; If we run out of sequence parts,
-		     ;;    this pattern is finished.
-		     (setf res :pop))
-		  (multiple-value-setq (res new-coll new-tail)
-		    (match-part (first tl)))
-		  (when res
-		    (case top-coll
-		      (:seq* (setf top-tail tl))
-		      (:seq  (setf top-tail (cdr tl))))
-		    (return)))))
+	   (cond ((null ftail)
+		  ;; If all the elements are used up, 
+		  ;;    this pattern remains on the stack.
+		  (setf res :done))
+		 (t 
+		  (do ((tl top-tail (cdr tl)))
+		      ((atom tl)
+		       ;; If we run out of sequence parts,
+		       ;;    this pattern is finished.
+		       (setf res :pop))
+		    (multiple-value-setq (res new-coll new-tail)
+		      (match-part (first tl)))
+		    (when res
+		      (case top-coll
+			(:seq* (setf top-tail tl))
+			(:seq  (setf top-tail (cdr tl))))
+		      (return))))))
 
 	  ((:set :set*)
 	   (when (null matched)
@@ -2469,8 +2505,8 @@
 	     ;;  save the full content
 	     (setf matched top-tail))
 	   (case res
-	     (:pop 
-	      ;; if a complex-sub-part succeeded, the restore the full pattern again
+	     ((:pop :pop+)
+	      ;; if a complex-sub-part succeeded, then restore the full pattern again
 	      (case top-coll (:set* (setf top-tail matched)))))
 	     
 	   (if (null ftail)
@@ -2500,7 +2536,8 @@
 			       (setf top-tail (cdr top-tail)
 				     matched nil
 				     res :step)))
-		 ((eq res :pop) (setf matched t res :step))
+		 ((or (eq res :pop) (eq res :pop+))
+		  (setf matched t res :step))
 		 ((null ftail) (setf res :done))
 		 ((null top-tail) (setf res :pop))
 		 (t (multiple-value-setq (res new-coll new-tail)
@@ -2514,7 +2551,8 @@
 
 	  ((:set1 :set+)
 	   (cond ((null res))
-		 ((eq res :pop) (pushnew index matched) (setf res :step))
+		 ((or (eq res :pop) (eq res :pop+))
+		  (pushnew index matched) (setf res :step))
 		 ((null ftail) (setf res :done))
 		 ((null top-tail) (setf res :pop))
 		 (t (let ((i 0))
@@ -2535,7 +2573,7 @@
 
 	  (:or
 	   (cond ((null res) (pop top-tail) (setf res :step))
-		 ((eq res :pop)
+		 ((or (eq res :pop) (eq res :pop+))
 		  ;; Once a clause is satisfied, pop the :or
 		  ;;  pattern off the stack.
 		  (setf top-tail (list (first top-tail))))
@@ -2547,7 +2585,9 @@
 		      ((nil) (pop top-tail) (setf res :step))
 		      (:match (setf top-tail (list (first top-tail)))
 			      (incf fhead) (pop ftail)
-			      (setf res :pop))))
+			      ;; we need to increment fhead in the outer context too
+			      (setf res :pop+)
+			      )))
 		 ))
 		  
 	  )
@@ -2571,14 +2611,14 @@
 	   ;;  of the matching up to now, and return success.
 	   (push-state)
 	   (return t))
-	  (:pop
-	   (cond (stack (pop-state))
+	  ((:pop :pop+)
+	   (cond (stack (pop-state) (case res (:pop+ (incf fhead))) )
 		 (ftail
 		  ;; We have run out of pattern, but there are elements
 		  ;;  left to match;  this is failure.
 		  (return nil))
 		 (t (push-state)
-		  (return t))))
+		    (return t))))
 	  ((nil)
 	   (cond (stack (pop-state))
 		 (t (return nil))))
@@ -2596,6 +2636,12 @@
       ((atom tl) default)
     (when (xmp-match-name conn (first tl) pattern)
       (return (second tl)))))
+
+(defmethod xmp-mem2 ((conn t) plist pattern)
+  (do ((tl plist (cddr tl)))
+      ((atom tl) nil)
+    (when (xmp-match-name conn (first tl) pattern)
+      (return tl))))
 
 (defmethod xmp-assoc ((conn t) pattern alist)
   (do ((tl alist (cdr tl)))
@@ -2681,70 +2727,105 @@
 	    (:array (values `(:seq* (:element nil ,(second eldef))) nil eldef))
 	    ))))
 
-(defun xmp-make-tables (fourth-p) 
-  (vector (make-hash-table :test #'eq)
-	  (make-hash-table :test #'equal)
-	  (make-hash-table :test #'equalp)
 
-	  (when fourth-p (make-hash-table :test #'eq))
 
-	  ))
+(defun xmp-lookup (table dname dstring name4 
+			 &key attribute (attributes nil a-p) (value nil v-p) default
+			 &aux found (not-found t) key edef idef item plist
+			 (not '#:not) any ht)
+  ;; attributes -> :query            ; return list  (name value ... )
+  ;;            -> (name value ... ) ; update existing attribute list
+  ;;            -> nil               ; drop all attributes
+  ;; attribute  -> symbol            ; get this attribute value
+  ;;            -> (name value)      ; update one attribute value
+  ;; default  ; default value for get attribute
 
-(defvar *defined-xmp-elements*
-  ;; Fourth element is Defined Types
-  (xmp-make-tables t))
+  ;; NOTE: attribute should only be stored in element definition tables.
+  ;;       NOT in export tables.
 
-(defun xmp-lookup (table dname dstring name4 &optional (val nil v-p)
-			 &aux found item (not '#:not) any)
   (if name4
       (if v-p
-	  (setf (gethash name4 (elt table 3)) val)
+	  (setf (gethash name4 (elt table 3)) value)
 	(gethash name4 (elt table 3)))
     (let ()
-      (or (when (symbolp dname)
-	    (setf item (gethash dname (elt table 0) not))
+      (or (when (and dname (symbolp dname))
+	    (setf item (gethash (setf key dname) (setf ht (elt table 0)) not))
 	    (when (not (eq item not))
-	      (setf found dname)))
+	      (setf not-found nil found dname)))
 	  (when (typecase dstring
 		  ((member nil) nil)
 		  (symbol (setf dstring (symbol-name dstring)))
 		  (string t))
-	    (setf item (gethash dstring (elt table 1) not))
+	    (setf item (gethash (setf key dstring) (setf ht (elt table 1)) not))
 	    (when (not (eq item not))
-	      (setf found dstring)))
+	      (setf not-found nil found dstring)))
 	  (when (typecase dstring
 		  ((member nil) nil)
 		  (symbol (setf dstring (symbol-name dstring)))
 		  (string t)
 		  (cons (ecase (first dstring)
 			  (:any-case (setf dstring (second dstring))))))
-	    (setf item (gethash dstring (elt table 2) not))
+	    (setf item (gethash (setf key dstring) (setf ht (elt table 2)) not))
 	    (when (not (eq item not))
-	      (setf found dstring any :any))))
+	      (setf not-found nil found dstring any :any))))
+      (setf idef item)
+      (and found (consp item) (eq :element (first item))
+	   (setf idef (third item) edef item plist (cdddr item)))
+      (cond ((and (null v-p) (null a-p))
+	     (cond ((null attribute) nil)
+		   ((or (atom attribute)
+			(and (consp attribute) (eq :any-case (first attribute))))
+		    (cond (not-found)
+			  (edef
+			   (setf idef (xmp-getf nil plist attribute default)))
+			  (t (setf idef default))))
+		   ((consp attribute)
+		    (cond ((eq idef not)
+			   (setf v-p t
+				 value (list :element
+					   (list key)
+					   nil
+					   (first attribute) (second attribute))))
+			  (edef (if (setf edef
+					  (xmp-mem2 nil plist (first attribute)))
+				    (setf (second edef) (second attribute)
+					  v-p t value item)
+				  (setf (cdddr item)
+					(setf plist
+					      (list* (first attribute) (second attribute)
+						     (cdddr item)))
+					v-p t value item)))
+			  (t (setf v-p t
+				   value (list :element (list key) item
+					     (first attribute) (second attribute))))))
+		   (t (error "Ill-formed attribute ~S" attribute))))
+	    ((and (null v-p) (eq attributes :query))
+	     (setf idef (when edef plist)))
+	    ((and (null v-p) a-p (null attributes))
+	     (if edef
+		 (setf (cdddr edef) nil plist nil idef nil)
+	       (setf idef nil)))
+	    (v-p (when not-found
+		   (cond ((and dname (symbolp dname))
+			  (setf ht (elt table 0) key dname))
+			 ((null dstring) (setf ht nil))
+			 (any   (setf ht (elt table 2) key dstring))
+			 (t     (setf ht (elt table 1) key dstring))))
+		 (when attributes
+		   (when (and (consp value) (eq :element (first value)))
+		     (error "Ambiguous call to xmp-lookup (a)."))
+		   (setf value (list* :element (list key) value attributes))))
+	    (t (error "Ambiguous call to xmp-lookup (b).")))
       (if v-p
-	  (let (key)
-	    (typecase found
-	      ((member nil)
-	       (cond ((and dname (symbolp dname))
-		      (setf table (elt table 0) key dname))
-		     ((null dstring) (setf table nil))
-		     (any   (setf table (elt table 2) key dstring))
-		     (t     (setf table (elt table 1) key dstring))))
-	      (symbol (setf table (elt table 0) key found))
-	      (string
-	       (if any
-		   (setf table (elt table 2) key found)
-		 (setf table (elt table 1) key found))))
-	    (when table
-	      (setf (gethash key table) val)))
+	  (and key ht (values (setf (gethash key ht) value) ht))
+	
 	;; values:   item symbol nil   -> found in EQ table
 	;;           item string nil   -> found in EQUAL table
 	;;           item string :any  -> found in STRING-EQUAL table
-	(values (if (eq item not)
+	(values (if (eq idef not)
 		    nil
-		  item)
-		found
-		any)))))
+		  idef)
+		found any plist)))))
 
 
 
@@ -2927,10 +3008,10 @@
        (xmp-error conn :def
 		  (list "redefining ~A type ~S" (xmp-warning-leader conn) dname)))))
   (xmp-lookup *defined-xmp-elements* nil nil dname
-	      (apply 'xmp-normal-type-spec conn type-spec nss options)))
+	      :value (apply 'xmp-normal-type-spec conn type-spec nss options)))
 
 (defmethod define-xmp-element ((conn t) names type-spec &rest options
-			       &key (redef :warn) (nss :dns)
+			       &key (redef :warn) (nss :dns) nillable
 			       &allow-other-keys)
   (if (and (consp names) (not (eq :any-case (car names))))
       (mapcar #'(lambda (name)
@@ -2961,7 +3042,8 @@
 			oname)
 		    dname)
 		  nil
-		  tdef))))
+		  :attributes (when nillable (list :nillable t))
+		  :value tdef))))
 
 (defmethod xmp-getf-in-part ((conn t) part name &optional default)
   (getf (typecase part
@@ -3140,12 +3222,12 @@
 	  (setf string body)
 	(error "URI ~A returned error ~S ~S ~S"
 	       uri rc h ruri))))
+  (when (and string file) (error "Ambiguous call."))
 
   #+soap-pxml
   (let (all)
     (multiple-value-bind (xml pns)
-	(cond ((and string file) (error "Ambiguous call."))
-	      (string 
+	(cond (string 
 	       (net.xml.parser:parse-xml string :content-only t))
 	      (file   (with-open-file 
 		       (s file)
@@ -3160,8 +3242,7 @@
       all))
 
   #+(or soap-lxml soap-sax)
-  (cond ((and string file) (error "Ambiguous call."))
-	(string (xmp-namespaces-from-string string))
+  (cond (string (xmp-namespaces-from-string string))
 	(file   (xmp-namespaces-from-file file)))
   )
 
@@ -3330,7 +3411,10 @@
   (call-next-method))
 #+(or soap-lxml soap-sax)
 (defmethod net.xml.sax:start-prefix-mapping ((parser namespace-parser) (prefix t) iri)
-  (pushnew iri (namespace-parser-namespaces parser) :test #'equal)
+  (or 
+   ;; Ignore xmlns=""
+   (equal iri "") (null iri)
+   (pushnew iri (namespace-parser-namespaces parser) :test #'equal))
   (call-next-method))
 
 

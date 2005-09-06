@@ -1,7 +1,30 @@
+2005-09-02    <mm@PROA>
+
+	* xmp-base.cl (xmp-match-complex-tail): fix error in matching :or
+	* xmp-base.cl (xmp-extract-namespaces): remove dependence on pxml
+	* xmp-base.cl: add xmp-nillable accessor
+	   (xmp-decode-body): look for 'nil' attribute
+	   (define-xmp-element): add :nillable argument
+	* xmp-base.cl (xmp-lookup): also keep element attributes in tables
+	* xmp-base.cl (xmp-decode-body): refine error message [bug15502]
+	              (xmp-decode-body): partial fix for  [bug15528] 
+	* xmp-base.cl (net.xml.sax:start-prefix-mapping): ignore xmlns= entries
+	* xmp-base.cl (xmp-search-map): export
+	* xmp-wsdl.cl (wsdl-make-interface): add service=:none
+	* xmp-wsdl.cl (wsdl-add-element): collect attributes in defined-elements list
+           	      (encode-wsdl-file): emit nillable attributes
+	* xmp-wsdl.cl (wsdl-make-interface): emit stronger case-mode warning
+	                 (encode-wsdl-file): add target-package argument
+	             (wsdl-encode-type-def): look for element name too [bug15508]
+	* xmp-wsdl.cl (encode-wsdl-file): revise handling of target arg [bug15509]
+	* xmp-schema.cl (schema-parts-to-type): look for <simpleType><restriction>
+   	         (package xs): add minInclusive and maxInclusive
+	* xmp-schema.cl (schema-component-to-cpart): collect and pass nillable attribute
+
 2005-08-19  Martin Mikelsons  <mm@gemini>
 
 	* xmp-soap.cl (soap-version): fix format strings [bug15543] 
-
+	
 2005-07-13  Kevin Layer  <layer@gemini>
 
 	* Makefile: add more files to soap.002 patch
@@ -340,4 +363,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.7 $
+$Revision: 2.8 $

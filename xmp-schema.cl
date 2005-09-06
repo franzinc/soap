@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-schema.cl,v 2.4 2005/08/03 05:09:48 layer Exp $
+;; $Id: xmp-schema.cl,v 2.5 2005/09/06 17:10:28 layer Exp $
 
 ;; XML Schema support
 
@@ -87,6 +87,8 @@
      "base"
      "import"
      "include"
+     "minInclusive"
+     "maxInclusive"
 
      ;; simpleType names (incomplete)
 
@@ -141,6 +143,7 @@
      "enumeration"
      "maxLength"
      "maxlength"
+     "nillable"
      ))
 
   (defpackage :net.xmp.schema-instance
@@ -150,6 +153,7 @@
      "base"
      "minOccurs"
      "maxOccurs"
+     "nil"
      ))
 
   )
@@ -378,10 +382,10 @@
 	       (t (schema-error-p conn error-p "Unknown complex-type."))))
 
 	((eq key :simple-type)
-	 (cond ((schema-single-part comp :list)
-
-		;; look for <restriction base="s:string">...</restriction> ???
-
+	 (cond ((and (setf part (schema-single-part comp :restriction))
+		     (setf base (schema-decoded-attribute part "base")))
+		base)
+	       ((schema-single-part comp :list)
 		'xs:|string|)
 	       (t (schema-error-p conn error-p "Unknown simple-type."))))
 
@@ -413,17 +417,21 @@
 	 
 
 (defmethod schema-component-to-cpart ((comp schema-component)
-				      &aux (key (schema-element-key comp)))
+				      &aux n (key (schema-element-key comp)))
   (cond
     ((xmp-collector-p nil key)
      (list (schema-component-to-collector comp)))
     ((eq key :element)
      (list 
-      (list :element 
+      (list* :element 
 	    (list (schema-element-name comp))
 	    (or (schema-decoded-attribute comp "type")
 		(schema-parts-to-type comp :error-p nil)
-		(xmp-any-type nil)))))
+		(xmp-any-type nil))
+	    (and (setf n (schema-decoded-attribute comp "nillable"))
+		 (or (equalp n "true") (equal n "1"))
+		 (list :nillable t))
+	    )))
     ((eq key :annotation) nil)
     ((eq key :documentation) nil)
     ((eq key :any) (list (list :any)))
@@ -564,7 +572,7 @@
 (define-xmp-element nil 'xs:|restriction|
   '(:complex (:set* xs:|pattern| xs:|attribute| xs:|sequence| xs:|enumeration|
 		    xs:|maxLength| xs:|maxlength|
-		    xs:|attributeGroup|
+		    xs:|attributeGroup| xs:|minInclusive| xs:|maxInclusive|
 		    )))
 (define-xmp-element nil 'xs:|simpleContent|  '(:complex (:set* xs:|extension|)))
 (define-xmp-element nil 'xs:|extension|

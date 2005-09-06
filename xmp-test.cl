@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.4 2005/08/03 05:09:48 layer Exp $
+;; $Id: xmp-test.cl,v 2.5 2005/09/06 17:10:28 layer Exp $
 
 ;; Internal-use test cases
 
@@ -107,29 +107,32 @@ Individual tests:
 |#
 
 
-(defun test-soap-local ()
+(defun test-soap-local (&aux r)
   (with-tests
    (:name "SOAP module (local)")
    (setf *error-protect-tests* t)
-   (soap-local-tests)))
+   (setf r (soap-local-tests)))
+  r)
 
 (defun soap-local-tests ()
-  (test nil (null (xmp-match-tests)))
-  (test nil (null (xmp-break-tests)))
+  (and 
+   (test nil (null (xmp-match-tests)))
+   (test nil (null (xmp-break-tests)))
 
-  (test nil (null (ss1 :index :all)))
-  (test nil (null (ss2)))
-  (test :all-ok (test-validator1))
-  (test nil (null (funcall 'start-server)))
-  (test t (test-bn))
-  (test-no-error (stop-soap-server (symbol-value '*bn-server*)))
-  )
+   (test nil (null (ss1 :index :all)))
+   (test nil (null (ss2)))
+   (test :all-ok (test-validator1))
+   (test nil (null (funcall 'start-server)))
+   (test t (test-bn))
+   (test-no-error (stop-soap-server (symbol-value '*bn-server*)))
+   ))
 
-(defun test-soap-remote ()
+(defun test-soap-remote (&aux r)
   (with-tests
    (:name "SOAP module (external servers)")
    (setf *error-protect-tests* t)
-   (soap-remote-tests)))
+   (setf r (soap-remote-tests)))
+  r)
 
 (defun soap-remote-tests ()
 
@@ -137,26 +140,29 @@ Individual tests:
 
    )
 
-(defun test-soap-x (&optional remote)
+(defun test-soap-x (&optional remote &aux r)
   (if remote 
       (with-tests 
        (:name "Xmethods (fetch external WSDL)")
        (setf *error-protect-tests* t)
-       (test-no-error (xmeth-def :uri))
-       (test-no-error (xmeth-get))
-       (test-no-error (xmeth-save))
-       (test-no-error (xmeth-all-remote))
-       (test-no-error (xmeth-save))
-       )
+       (setf r (and 
+		(test-no-error (xmeth-def :uri))
+		(test-no-error (xmeth-get))
+		(test-no-error (xmeth-save))
+		(progn (xmeth-all-remote) t)
+		(test-no-error (xmeth-save))
+		)))
     (with-tests
      (:name "Xmethods (local copies of WSDL)")
      (setf *error-protect-tests* t)
-     (test-no-error (xmeth-def))
-     (test-no-error (xmeth-read))
-     (test-no-error (xmeth-all-local))
-     (test-no-error (xmeth-save))
-     )
-    ))
+     (setf r (and 
+	      (test-no-error (xmeth-def))
+	      (test-no-error (xmeth-read))
+	      (progn (xmeth-all-local) t)
+	      (test-no-error (xmeth-save))
+	      )))
+    )
+  r)
   
 	
 
@@ -505,10 +511,14 @@ Individual tests:
     (unwind-protect
 	(let ()
 	  (setf net.aserve::*enable-logging* log)
-	  (setf *server* (make-validator1-server :port port
-						 :debug (case debug
-							  ((nil :client) nil)
-							  (otherwise debug))))
+	  (and *server* stop 
+	       (progn (net.xmp:xmp-stop-server *server*)
+		      (setf *server* nil)))
+	  (or *server*
+	      (setf *server* (make-validator1-server :port port
+						     :debug (case debug
+							      ((nil :client) nil)
+							      (otherwise debug)))))
 	  (macrolet ((run-one (body)
 			      `(when (or (null index) (eql index this))
 				 (dotimes (n reps)
@@ -569,17 +579,22 @@ Individual tests:
 						    char)
 						(let ()
 						  (decf ch)
-						  (elt "abcdefghijklmnopqrstuvw" (random 23))))
-					    (elt "abcdefghijklmnopqrstuvw" (random 23)))))))
-			       (rep (call-soap-method client "countTheEntities" :|s| data))
+						  (elt "abcdefghijklmnopqrstuvw"
+						       (random 23))))
+					    (elt "abcdefghijklmnopqrstuvw" 
+						 (random 23)))))))
+			       (rep (call-soap-method
+				     client "countTheEntities" :|s| data))
 			       (res (soap-sub-element-content (cdr rep) :|struct1|))
 			       )
 			  (if (and (eql lb (soap-sub-element-content
 					    res :|ctLeftAngleBrackets|))
 				   (eql rb (soap-sub-element-content
 					    res :|ctRightAngleBrackets|))
-				   (eql am (soap-sub-element-content res :|ctAmpersands|))
-				   (eql ap (soap-sub-element-content res :|ctApostrophes|))
+				   (eql am (soap-sub-element-content
+					    res :|ctAmpersands|))
+				   (eql ap (soap-sub-element-content
+					    res :|ctApostrophes|))
 				   (eql qt (soap-sub-element-content res :|ctQuotes|)))
 			      (fmt "~&;;~2D. ok all=~S~%" this all)
 			    (error "run1: bad result ~S ~S" data rep))
@@ -591,9 +606,10 @@ Individual tests:
 			(let* ((m (random 100))
 			       (l (random 100))
 			       (c (random 100))
-			       (rep (call-soap-method client "easyStructTest"
-						      :|stooges|
-						      (list :|moe| m :|larry| l :|curly| c)))
+			       (rep (call-soap-method
+				     client "easyStructTest"
+				     :|stooges|
+				     (list :|moe| m :|larry| l :|curly| c)))
 			       (num (soap-sub-element-content (cdr rep) :|number|)))
 			  (if (eql num (+ m l c))
 			      (fmt "~&;;~2D. ok num=~S~%" this num)
@@ -602,19 +618,22 @@ Individual tests:
 		       (run3
 			(n)
 			;; echoStructTest
-			(let* ((out (let (new)
-				      (dotimes (j (+ 2 (random 5)))
-					(setf new
-					      (append
-					       new
-					       (list
-						(intern (format nil "substruct~A" j) :keyword)
-						(list :|moe|   (format nil "~A" (random 10))
-						      :|larry| (format nil "~A" (random 10))
-						      :|curly| (format nil "~A" (random 10))
-						      )))))
-				      new))
-			       (rep (call-soap-method client "echoStructTest" :|myStruct1| out))
+			(let* ((out
+				(let (new)
+				  (dotimes (j (+ 2 (random 5)))
+				    (setf new
+					  (append
+					   new
+					   (list
+					    (intern
+					     (format nil "substruct~A" j) :keyword)
+					    (list :|moe|   (format nil "~A" (random 10))
+						  :|larry| (format nil "~A" (random 10))
+						  :|curly| (format nil "~A" (random 10))
+						  )))))
+				  new))
+			       (rep (call-soap-method
+				     client "echoStructTest" :|myStruct1| out))
 			       (res (soap-sub-element-content (cdr rep) :|myStruct1|))
 			       )
 			  (if (equal out (soap-alist-to-plist res t))
@@ -719,6 +738,49 @@ Individual tests:
 					(:|toolkitOperatingSystem| "Windows and Unix"))))
 			    (fmt "~&;;~2D. ok n=~S~%" this n)
 			  (error "run8: bad result ~S" rep)))
+
+		       (run9
+			(n)
+			(let* ((num (random 100))
+			       (bool (eql 1 (random 2)))
+			       (st (random-string 5 15))
+			       (db (random 10.1d0))
+			       (dt (format nil "~A" (random 100000)))
+			       (bin (random-string 50 100))
+			       (out (list num bool st db dt bin
+					  'xsd:|token|))
+			       (rep (call-soap-method client "manyTypesTest2"
+						      :|num1| num
+						      :|bool| bool
+						      :|state| st
+						      :|doub| db
+						      :|dat| dt
+						      :|bin| bin
+						      :|qname| 'xsd:|token|
+						      ))
+			       (res (soap-sub-element-content (cdr rep) :|Result1|))
+			       )
+			  (if (and (arrayp res) 
+				   (equal '(9) (array-dimensions res))
+				   (equal out (subseq (concatenate 'list res) 0 7)))
+			      (fmt "~&;;~2D. ok n=~S~%" this n)
+			    (error "run9: bad result ~S ~S" out res))
+			  (setf rep (call-soap-method client "manyTypesTest2"
+						      :|num2| num
+						      :|bool| bool
+						      :|state| st
+						      :|doub| db
+						      :|dat| dt
+						      :|bin| bin
+						      :|qname| 'xsd:|token|
+						      ))
+			  (if (and (arrayp res) 
+				   (equal '(9) (array-dimensions res))
+				   (equal out (subseq (concatenate 'list res) 0 7)))
+			      (fmt "~&;;~2D. ok n=~S~%" this n)
+			    (error "run9: bad result ~S ~S" out res))
+			  )
+			)
 		       )
  
 		  (incf this)
@@ -737,6 +799,8 @@ Individual tests:
 		  (run-one (run7 n))
 		  (incf this)
 		  (run-one (run8 n))
+		  (incf this)
+		  (run-one (run9 n))
 		
 		  (when stop (net.xmp:xmp-stop-server *server*))
 

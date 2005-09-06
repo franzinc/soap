@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapval1.cl,v 2.3 2005/08/03 05:09:48 layer Exp $
+;; $Id: soapval1.cl,v 2.4 2005/09/06 17:10:28 layer Exp $
 
 ;; SOAP server example
 ;; This example may be submitted to the SOAP validator at http://www.soapware.org/
@@ -237,7 +237,11 @@
 
     ;; Additonal tests not called from web validator
     (soap-export-method s "manyTypesTest2" 
-			(list "num" "bool" "state" "doub" "dat" "bin" "qname")
+			(list "num1" "bool" "state" "doub" "dat" "bin" "qname")
+			:lisp-name 'validator1-many-types2
+			:return "manyTypesTestResult")
+    (soap-export-method s "manyTypesTest2" 
+			(list "num2" "bool" "state" "doub" "dat" "bin" "qname")
 			:lisp-name 'validator1-many-types2
 			:return "manyTypesTestResult")
 
@@ -290,7 +294,7 @@
        (call 7 "whichToolkit")
 
        (call 8 "manyTypesTest2"
-	     :|num| 17 :|bool| t :|state| "a string" :|doub| 4.5 :|dat| 12345
+	     :|num1| 17 :|bool| t :|state| "a string" :|doub| 4.5 :|dat| 12345
 	     :|bin| "string to encode"
 	     :|qname| 'net.xmp.soap.envelope:|Body|
 	     )
@@ -373,10 +377,19 @@
 
 ;;; ADDITIONAL TESTS not called from web validator
 
+(define-soap-element nil "num" 
+  '(:complex (:or (:element "num1" xsd:|int|)
+		  (:element "num2" xsd:|int|))))
+
 (define-soap-element nil "manyTypesTest2"
   '(:complex
     (:seq
-     (:element "num" xsd:|int|)
+     
+     ;;(:element "num" xsd:|int|)
+     ;;"num" 
+     (:or (:element "num1" xsd:|int|)
+	  (:element "num2" xsd:|int|))
+
      (:element "bool" xsd:|boolean|)
      (:element "state" xsd:|string|)
      (:element "doub"  xsd:|float|)
@@ -387,21 +400,21 @@
 (define-soap-type nil :struct-of-2 '(:complex (:set (:element "foo" xsd:|string|)
 						    (:element "bar" xsd:|string|))))
 
-(defun validator1-many-types2 (&key |num| |bool| |state| |doub| |dat| |bin|
+(defun validator1-many-types2 (&key |num1| |num2| |bool| |state| |doub| |dat| |bin|
 				    |qname|
 				    )
   (list "Result1"
 	(list
-	 (list 'xsd:|int|      |num|)
+	 (list 'xsd:|int|      (or |num1| |num2|))
 	 (list 'xsd:|boolean|  |bool|)
 	 (list 'xsd:|string|   |state|)
 	 (list 'xsd:|float|    |doub|)
 	 (list 'xsd::|timeInstant| |dat|)
 	 (list 'xsd:|string|       |bin|)
+	 (list 'xsd:|QName| |qname|)
+	 (list 'xsd:|string| (format nil "~S" |qname|))
 	 (list :struct-of-2
 	       (list :foo "abc" :bar "def"))
-	 (list 'xsd:|string| (format nil "~S" |qname|))
-	 (list 'xsd:|QName| |qname|)
 	 )))
 
 
