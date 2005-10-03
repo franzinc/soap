@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.6 2005/08/19 19:29:51 mm Exp $
+;; $Id: xmp-soap.cl,v 2.7 2005/10/03 20:20:22 layer Exp $
 
 ;; SOAP support
 
@@ -440,8 +440,10 @@
     (soap-debug      :accessor soap-debug :initarg :soap-debug)
 
     ;; THESE SLOTS ARE NOT COPIED by xmp-copy methods
-    (soap-message-body   :accessor soap-message-body   :initform nil)
-    (soap-message-arrays :accessor soap-message-arrays :initform nil)
+    (soap-message-body   :accessor soap-message-body   :initform nil
+			 :documentation "no-xmp-copy")
+    (soap-message-arrays :accessor soap-message-arrays :initform nil
+			 :documentation "no-xmp-copy")
 
     ))
 
@@ -454,13 +456,18 @@
     (soap-debug :initform *soap-server-debug*)
 
     ;; THESE SLOTS ARE NOT COPIED by xmp-copy methods
-    (action :accessor soap-server-action :initarg :action :initform nil)
+    (action :accessor soap-server-action :initarg :action :initform nil
+	    :documentation "no-xmp-copy")
 
     ;; these slots are set before calling soap-invoke-method
-    (soap-server-message-method :accessor soap-server-message-method :initform nil)
-    (soap-server-message-return :accessor soap-server-message-return :initform nil)
-    (soap-server-message-signature :accessor soap-server-message-signature :initform nil)
-    (soap-server-message-action :accessor soap-server-message-action :initform nil)
+    (soap-server-message-method :accessor soap-server-message-method :initform nil
+				:documentation "no-xmp-copy")
+    (soap-server-message-return :accessor soap-server-message-return :initform nil
+				:documentation "no-xmp-copy")
+    (soap-server-message-signature :accessor soap-server-message-signature :initform nil
+				   :documentation "no-xmp-copy")
+    (soap-server-message-action :accessor soap-server-message-action :initform nil
+				:documentation "no-xmp-copy")
 
     ))
 
@@ -478,7 +485,7 @@
 
   )
 
-
+#+ignore
 (defmethod xmp-copy ((object soap-connector)
 		     &key &allow-other-keys
 		     &aux (new (call-next-method)))

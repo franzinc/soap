@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.5 2005/09/06 17:10:28 layer Exp $
+;; $Id: xmp-test.cl,v 2.6 2005/10/03 20:20:22 layer Exp $
 
 ;; Internal-use test cases
 
@@ -68,6 +68,7 @@ Individual tests:
 
 - From soapex.cl and soapval1.cl -
 (test-clients) --> t   ;; some clients may not respond
+(run3 count) --> ((init extend calls-to-adjust-array) ...)
 (ss1 :index :all) --> t
 (ss2) --> t
 (test-validator1 :port pppp :stop nil) --> :all-ok
@@ -97,7 +98,7 @@ Individual tests:
 - WSDL decoding tests - 
 (wsdl11) --> ss1.wsdl ==> try with SOAPScope
 (wsdl12) --> ss2.wsdl ==> try with SOAPScope
-(wsdl13) --> ss3.wsdl ==> try with SOAPScope
+(wsdl13) --> ssv.wsdl ==> try with SOAPScope
 (wsdl22) --> amazon-client.cl
 (wsdl25) --> amazon-gen.wsdl
 (wsdl42) --> google-client.cl
@@ -260,64 +261,72 @@ Individual tests:
   '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
 (defun soap-method-1 (&key (|elt1| 0) (|elt2| 0) (|elt3| 0))
   (list 'ss1::result (+ |elt1| |elt2| |elt3|)))
-(defun ss1 (&key (index 1 )(port 4567) (path "/SOAP") debug)
+(defun ss1 (&key (index 1 )(port 4567) (path "/SOAP") debug (stop t))
   (let* ((url (format nil "http://localhost:~A~A" port path))
 	 (server (soap-message-server :start `(:port ,port)
-				     :publish `(:path ,path)
-				     :lisp-package :keyword
-				     :message-dns '(nil (:ss1))
-				     :soap-debug
-				     (case debug ((:client nil) nil) (otherwise t))
-				     :url url
-				     )))
+				      :publish `(:path ,path)
+				      :lisp-package :keyword
+				      :message-dns '(nil (:ss1))
+				      :soap-debug
+				      (case debug ((:client nil) nil) (otherwise t))
+				      :url url
+				      )))
 
     (soap-export-method server 'ss1::soap-method-1 '(:|elt1| :|elt2| :|elt3|)
 			:return 'ss1::soap-result-1
 			:action "uri:method1"
 			:lisp-name 'soap-method-1)
-    (flet ((one (client index case e1 e2 e3)
-		(if (or (eq index :all)
-			(eql index case))
-		    (let (r)
-		      (cond ((and e1 e2 e3)
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1
-				      :|elt1| e1 :|elt2| e2 :|elt3| e3)))
-			    ((and e1 e2)
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1 :|elt1| e1 :|elt2| e2)))
-			    ((and e1 e3)
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1 :|elt1| e1 :|elt3| e3)))
-			    ((and e2 e3)
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1 :|elt2| e2 :|elt3| e3)))
-			    (e1
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1 :|elt1| e1)))
-			    (e2
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1 :|elt2| e2)))
-			    (e3
-			     (setq r (call-soap-method
-				      client 'ss1::soap-method-1 :|elt3| e3))))
-		      (equal r (list 'ss1::soap-result-1
-				     (list 'ss1::result
-					   (+ (or e1 0) (or e2 0) (or e3 0))))))
-		  t)))
-      (let* ((client (soap-message-client :url url
-					  :lisp-package :keyword
-					  :message-dns '(nil (:ss1))
-					  :soap-debug
-					  (case debug ((:server nil) nil) (otherwise t))
-					  ))
-	     (result
-	      (and  (one client index 0 111 222 333)
-		    (one client index 1 123 nil nil)
-		    (one client index 2 nil 456 nil)
-		    (one client index 3 nil nil 789))))		  
-	(values result server client net.xmp.soap::*soap-last-server*)
-	))))
+    (unwind-protect
+	(flet ((one (client index case e1 e2 e3)
+		    (if (or (eq index :all)
+			    (eql index case))
+			(let (r)
+			  (cond ((and e1 e2 e3)
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1
+					  :|elt1| e1 :|elt2| e2 :|elt3| e3)))
+				((and e1 e2)
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1 
+					  :|elt1| e1 :|elt2| e2)))
+				((and e1 e3)
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1
+					  :|elt1| e1 :|elt3| e3)))
+				((and e2 e3)
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1 
+					  :|elt2| e2 :|elt3| e3)))
+				(e1
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1 :|elt1| e1)))
+				(e2
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1 :|elt2| e2)))
+				(e3
+				 (setq r (call-soap-method
+					  client 'ss1::soap-method-1 :|elt3| e3))))
+			  (equal r (list 'ss1::soap-result-1
+					 (list 'ss1::result
+					       (+ (or e1 0) (or e2 0) (or e3 0))))))
+		      t)))
+	  (let* ((client (soap-message-client :url url
+					      :lisp-package :keyword
+					      :message-dns '(nil (:ss1))
+					      :soap-debug
+					      (case debug
+						((:server nil) nil)
+						(otherwise t))
+					      ))
+		 (result
+		  (and  (one client index 0 111 222 333)
+			(one client index 1 123 nil nil)
+			(one client index 2 nil 456 nil)
+			(one client index 3 nil nil 789))))		  
+	    (values result server client net.xmp.soap::*soap-last-server*)
+	    ))
+      (and stop server (stop-soap-server server)))
+    ))
 
 (defun ss2 () 
   (and (simple-server :ns 0)
@@ -325,6 +334,93 @@ Individual tests:
        (null (simple-server :ns 2))))
 
 
+
+
+(define-soap-element nil 'ss1::soap-method-3
+  '(:complex (:seq (:element :|elt1| xsd:|string|))
+	     :action "uri:method3"
+	     ))
+(define-soap-element nil 'ss1::soap-result-3 
+  '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+(defun soap-method-3 (&key |elt1|)
+  (list 'ss1::result (length  |elt1|)))
+
+;; Manual test - no simple way to predict all results 
+(defun run3 (count &rest keys)
+  (mapcar #'(lambda (args)
+	      (apply #'(lambda (init extend)
+			 (prof:with-profiling
+			  (:type :count-only)
+			  (apply 'ss3 :count count :init init :extend extend keys))
+			 (list init extend 
+			       (dolist (c (prof:list-call-counts))
+				 (when (eq 'adjust-array
+					   (ignore-errors
+					     (excl::external-fn_symdef (cdr c))))
+				   (return (car c))))))
+		     args))
+	  '(
+	    (nil nil)
+	    (500 nil)
+	    (500 100)
+	    (12000 nil)
+	    (25000 nil)
+	    (12000 0.5)
+	    (1000 2.0)
+	    )))
+  
+
+(defun ss3 (&key (count 100) log
+		 (length 20000)
+		 (init nil) (extend nil)
+		 (port 4567) (path "/SOAP") debug (stop t))
+  (let* ((oldlog net.aserve::*enable-logging*)
+	 (url (format nil "http://localhost:~A~A" port path))
+	 (server (soap-message-server :start `(:port ,port)
+				      :publish `(:path ,path)
+				      :lisp-package :keyword
+				      :message-dns '(nil (:ss1))
+				      :soap-debug
+				      (case debug ((:client nil) nil) (otherwise t))
+				      :url url
+				      )))
+    (setf net.aserve::*enable-logging* log)
+    (soap-export-method server 'ss1::soap-method-3 '(:|elt1|)
+			:return 'ss1::soap-result-3
+			:action "uri:method3"
+			:lisp-name 'soap-method-3)
+    (unwind-protect
+	(let (client result)		  
+	    
+	  (dotimes (i count)
+	    ;; make a new client each time around to start with fresh
+	    ;; message buffer each time
+	    (setf client (soap-message-client :url url
+					    :lisp-package :keyword
+					    :message-dns '(nil (:ss1))
+					    :message-init
+					    (if extend (list init extend) init)
+					    :soap-debug
+					    (case debug
+					      ((:server nil) nil)
+					      (otherwise t))
+					    ))
+	    (or (eql
+		 length
+		 (soap-result-only
+		  client 
+		  (setf 
+		   result
+		   (call-soap-method 
+		    client 'ss1::soap-method-3
+		    :|elt1| (make-string length :initial-element #\a)))
+		  t 'ss1::soap-result-3 'ss1::result))
+		(error "Not eql ~S ~S" length result)))
+	  count)
+      (and stop server (stop-soap-server server))
+      (setf net.aserve::*enable-logging* oldlog)
+      )
+    ))
 
 
 (defpackage :amazon (:use))
@@ -380,7 +476,7 @@ Individual tests:
 		    :target :ts
 		    ))
 (defun wsdl13 ()
-  (encode-wsdl-file "ss3.wsdl"
+  (encode-wsdl-file "ssv.wsdl"
 		    :servers (make-validator1-server)
 		    :target :keyword
 		    ))

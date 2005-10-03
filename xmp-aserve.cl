@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-aserve.cl,v 2.4 2005/08/03 05:09:48 layer Exp $
+;; $Id: xmp-aserve.cl,v 2.5 2005/10/03 20:20:22 layer Exp $
 
 ;; Using AllegroServe as the transport layer.
 
@@ -101,9 +101,11 @@
 		   :initform (format 
 			      nil 
 			      "AllegroServe/~{~A.~A.~A~}(Allegro Common Lisp)"
-			      *aserve-version*))
+			      *aserve-version*)
+		   :documentation "no-xmp-copy")
     (parameters    :accessor xmp-server-parameters :initarg :parameters :initform nil)
-    (request       :accessor aserve-request :initform nil)
+    (request       :accessor aserve-request :initform nil
+		   :documentation "no-xmp-copy")
     ))
 
   ("server"
@@ -112,7 +114,7 @@
 
   )
 
-
+#+ignore
 (defmethod xmp-copy :around ((object xmp-aserve-connector) &key &allow-other-keys)
   (let ((new (call-next-method)))
     (setf (xmp-destination-host new) (xmp-destination-host object)
@@ -124,7 +126,7 @@
 	  (xmp-server-parameters new) (xmp-server-parameters object)
 	  )
     new))
-
+#+ignore
 (defmethod xmp-copy :around ((object xmp-aserve-server-connector) &key &allow-other-keys)
   (let ((new (call-next-method)))
     (setf (xmp-aserve-server new) (xmp-aserve-server object)

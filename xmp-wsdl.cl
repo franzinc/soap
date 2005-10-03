@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.6 2005/09/06 17:10:28 layer Exp $
+;; $Id: xmp-wsdl.cl,v 2.7 2005/10/03 20:20:22 layer Exp $
 
 ;; WSDL support
 
@@ -259,8 +259,6 @@
 
 
 (defclass wsdl-file-connector (schema-file-connector)
-
-  ;;NOTE: there is no xmp-copy method specialized on this class
 
   (
    (message-dns     :initform nil)

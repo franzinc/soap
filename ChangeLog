@@ -1,3 +1,15 @@
+2005-09-30    <mm@PROA>
+
+	* xmp-test.cl (run3): new test for asjusr-array strategy args
+	* xmp-base.cl (xmp-content-string): allow user to modify adjust-array
+	             strategy [rfe6307]
+		     :message-init initarg -> initial-size
+	                                   -> (initial-size extend-hint)
+	* xmp-soap.cl (xmp-copy): delete xmp-copy methods
+	* xmp-aserve.cl ("xmp-aserve"): delete xmp-copy methods
+	* xmp-base.cl (xmp-copy): new design - copy all instance slots without
+	                "no-xmp-copy" in documentation string
+
 2005-09-02    <mm@PROA>
 
 	* xmp-base.cl (xmp-match-complex-tail): fix error in matching :or
@@ -363,4 +375,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.8 $
+$Revision: 2.9 $

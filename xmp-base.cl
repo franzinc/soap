@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.5 2005/09/06 17:10:28 layer Exp $
+;; $Id: xmp-base.cl,v 2.6 2005/10/03 20:20:22 layer Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -461,26 +461,30 @@
 
    ;;; INSTANCE SLOTS NOT-copied by xmp-copy
 
-    (message-xml :accessor xmp-message-xml)
-    (message-dtd :accessor xmp-message-dtd)
-    (message-pns :accessor xmp-message-pns) ;;; parser namespace alist ((uri . pkg) ...)
+    (message-xml :accessor xmp-message-xml :documentation "no-xmp-copy")
+    (message-dtd :accessor xmp-message-dtd :documentation "no-xmp-copy")
+    (message-pns :accessor xmp-message-pns
+		 ;; parser namespace alist ((uri . pkg) ...)
+		 :documentation "no-xmp-copy") 
     (message-ns
      ;; Namespace mapping returned by XML parser
      ;; value -> (default-namespace-uri
      ;;           (package prefix uri) ... )
-     :accessor xmp-message-ns :initform nil)
+     :accessor xmp-message-ns :initform nil :documentation "no-xmp-copy")
     (message-attributes
      ;; hashtable to hold attributes of message elements
-     :accessor xmp-message-attributes :initform nil)
+     :accessor xmp-message-attributes :initform nil :documentation "no-xmp-copy")
 
     ))
   ("client"
    ((role :initform :client)
-    (client-start :accessor xmp-client-start :initform nil :initarg :start)
+    (client-start :accessor xmp-client-start :initform nil :initarg :start
+		  :documentation "no-xmp-copy")
     ))
   ("server"
    ((role :initform :server)
-    (server-lock :reader xmp-server-lock :initform (mp:make-process-lock))
+    (server-lock :reader xmp-server-lock :initform (mp:make-process-lock)
+		 :documentation "no-xmp-copy")
 
    ;;; INSTANCE SLOTS COPIED by xmp-copy
 
@@ -493,7 +497,12 @@
      :accessor xmp-server-exports :initform (xmp-make-tables nil))
     ))
   ("string-out"
-   ((message-string :accessor xmp-message-string :initform nil :initarg :message-string)
+   ((message-string :accessor xmp-message-string
+		    :initform nil :initarg :message-string
+		    :documentation "no-xmp-copy")
+    (message-init   :accessor xmp-message-init
+		    ;; [rfe6307] allow user to specify adjust-array strategy
+		    :initform 500 :initarg :message-init)
     ))
   )
 
@@ -558,6 +567,32 @@
 (defgeneric xmp-message-send (conn &key &allow-other-keys))
 
 
+(defmethod xmp-copy ((object xmp-connector))
+  (let* ((class (class-of object))
+	 (slots (mop:compute-slots class))
+	 (new (make-instance class))
+	 name alloc)
+    (dolist (slot slots)
+      (setf name (mop:slot-definition-name slot))
+      (setf alloc (mop:slot-definition-allocation slot))
+      (cond ((eq alloc :class)
+	     ;; do not copy class slots
+	     ;; (format t "~&; slot ~S is a class slot~%" name)
+	     )
+	    ((search "no-xmp-copy" (or (documentation slot t) ""))
+	     ;; do not copy slots with marker
+	     ;; (format t "~&; slot ~S is no-xmp-copy~%" name)
+	     )
+	    ((slot-boundp object name)
+	     ;; (format t "~&; slot ~S is copied~%" name)
+	     (setf (slot-value new name) (slot-value object name)))
+	    (t
+	     ;; do not copy unbound slots
+	     ;; (format t "~&; slot ~S is unbound~%" name)
+	     )))
+    new))
+
+#+ignore
 (defmethod xmp-copy ((object xmp-connector)
 		     &key &allow-other-keys
 		     &aux (new (make-instance (class-of object)))
@@ -576,6 +611,7 @@
 	)
   new)
   
+#+ignore
 (defmethod xmp-copy :around ((object xmp-server-connector) &key &allow-other-keys)
   (let ((new (call-next-method)))
     (setf (xmp-server-enabled new) (xmp-server-enabled object)
@@ -1066,9 +1102,15 @@
   (let ((s (xmp-message-string conn)))
     (if s
 	(setf (fill-pointer s) 0)
-      (setf (xmp-message-string conn)
-	    (make-array 500 :element-type 'character
-			:adjustable t :fill-pointer 0)))
+      (let* ((init (xmp-message-init conn))
+	     (size (etypecase init
+		     ((integer 100 1000000) init)
+		     (null 500)
+		     (cons (first init))
+		     )))
+	(setf (xmp-message-string conn)
+	      (make-array size :element-type 'character
+			  :adjustable t :fill-pointer 0))))
     (setf (xmp-out-nss conn) (xmp-initial-nss conn namespaces))
     ))
 
@@ -1082,7 +1124,16 @@
 		     data
 		   (format nil "~A" data)))
 	 (need (length string))
-	 (extend 100)
+	 (init (xmp-message-init conn))
+	 (extend (typecase init
+		   (cons (typecase (second init)
+			   ((integer 0) (+ need (second init)))
+			   ((float 0 0.999999) 
+			    (max need (truncate (* (array-total-size s)
+							    (+ 1.0 (second init))))))
+			   ((float 1.0)
+			    (max need (truncate (* (array-total-size s)
+						   (second init)))))))))
 	 c e)
     (dotimes (i need)
       (setf c (elt string i))
