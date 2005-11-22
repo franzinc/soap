@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.7 2005/11/22 00:48:04 mm Exp $
+;; $Id: xmp-base.cl,v 2.8 2005/11/22 22:25:26 mm Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -271,6 +271,7 @@
    define-namespace-map
    xmp-define-namespace-map
    match-tree 
+   xmp-new-environment
 
    ;; Macros
    with-tree-match
@@ -3269,7 +3270,13 @@
    (t default)))
 		      
 
-
+(defun xmp-new-environment ()
+  (setf *defined-xmp-elements* (xmp-make-tables t)
+	*xmp-server* nil
+	*xmp-package-to-xnd* (make-hash-table :test #'eq)
+	*xmp-uri-to-xnd* (make-hash-table :test #'equal)
+	*xmp-namespace-maps* (make-hash-table :test #'eq)
+	))
 
 
 (defun xmp-match-uri (pattern uri &aux (n pattern))

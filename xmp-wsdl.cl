@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.8 2005/11/22 00:48:04 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.9 2005/11/22 22:25:26 mm Exp $
 
 ;; WSDL support
 
@@ -63,8 +63,9 @@
    #:reader-prefix
    #:soap-object-class
    #:wsdl-file-connector
-   wsdl-object-classes
-   items
+   #:wsdl-object-classes
+   #:items
+   #:wsdl-generate-code
 
    ))
 
@@ -131,118 +132,135 @@
 
 (defvar *wsdl-debug* nil)
 
-(define-namespace :net.xmp.wsdl "wsdl" "http://schemas.xmlsoap.org/wsdl/")
-(xmp-define-namespace-map 
- :wsdl1.1 t
- (list
-  nil ;;; no default
-  ;;
-  ;; From: Web Services Description Language (WSDL) 1.1
-  ;;       W3C Note 15 March 2001
-  ;;       This version: http://www.w3.org/TR/2001/NOTE-wsdl-20010315
-  ;;
+(defun define-wsdl-names ()
+  (define-namespace :net.xmp.wsdl "wsdl" "http://schemas.xmlsoap.org/wsdl/")
+  (xmp-define-namespace-map 
+   :wsdl1.1 t
+   (list
+    nil ;;; no default
+    ;;
+    ;; From: Web Services Description Language (WSDL) 1.1
+    ;;       W3C Note 15 March 2001
+    ;;       This version: http://www.w3.org/TR/2001/NOTE-wsdl-20010315
+    ;;
 
-  '(:net.xmp.wsdl
-    "wsdl"
-    "http://schemas.xmlsoap.org/wsdl/"
-    ;; WSDL namespace for WSDL framework.
-    )
-  '(:net.xmp.wsdl.soap
-    "soap"
-    "http://schemas.xmlsoap.org/wsdl/soap/"
-    ;; WSDL namespace for WSDL SOAP binding.
-    )
-  ;; http http://schemas.xmlsoap.org/wsdl/http/ 
-  ;;      WSDL namespace for WSDL HTTP GET & POST binding.
-  '(:net.xmp.wsdl.http "http" "http://schemas.xmlsoap.org/wsdl/http/")
+    '(:net.xmp.wsdl
+      "wsdl"
+      "http://schemas.xmlsoap.org/wsdl/"
+      ;; WSDL namespace for WSDL framework.
+      )
+    '(:net.xmp.wsdl.soap
+      "soap"
+      "http://schemas.xmlsoap.org/wsdl/soap/"
+      ;; WSDL namespace for WSDL SOAP binding.
+      )
+    ;; http http://schemas.xmlsoap.org/wsdl/http/ 
+    ;;      WSDL namespace for WSDL HTTP GET & POST binding.
+    '(:net.xmp.wsdl.http "http" "http://schemas.xmlsoap.org/wsdl/http/")
 
-  ;; mime http://schemas.xmlsoap.org/wsdl/mime/
-  ;;      WSDL namespace for WSDL MIME binding.
-  '(:net.xmp.wsdl.mime "mime" "http://schemas.xmlsoap.org/wsdl/mime/")
+    ;; mime http://schemas.xmlsoap.org/wsdl/mime/
+    ;;      WSDL namespace for WSDL MIME binding.
+    '(:net.xmp.wsdl.mime "mime" "http://schemas.xmlsoap.org/wsdl/mime/")
     
-  :soap1
+    :soap1
 
-  ;; tns (various)
-  ;; The 'this namespace' (tns) prefix is used as a convention
-  ;;     to refer to the current document.
-  ;; (other) (various)
-  ;; All other namespace prefixes are samples only. 
-  ;;     In particular, URIs starting with 'http:// example.com'
-  ;;     represent some application- dependent or context-dependent URI [4].
-  ))
+    ;; tns (various)
+    ;; The 'this namespace' (tns) prefix is used as a convention
+    ;;     to refer to the current document.
+    ;; (other) (various)
+    ;; All other namespace prefixes are samples only. 
+    ;;     In particular, URIs starting with 'http:// example.com'
+    ;;     represent some application- dependent or context-dependent URI [4].
+    ))
 
-;;???(define-namespace :net.xmp.wsdl "wsdl" "http://www.w3.org/2003/06/wsdl")
-(xmp-define-namespace-map
- :wsdl1.2 t
- (list
-  nil
-  ;;
-  ;; From: Web Services Description Language (WSDL)
-  ;;       Version 1.2 Part 1: Core Language
-  ;;       W3C Working Draft 11 June 2003
-  ;;       This version: http://www.w3.org/TR/2003/WD-wsdl12-20030611
-  ;;
+  ;;???(define-namespace :net.xmp.wsdl "wsdl" "http://www.w3.org/2003/06/wsdl")
+  (xmp-define-namespace-map
+   :wsdl1.2 t
+   (list
+    nil
+    ;;
+    ;; From: Web Services Description Language (WSDL)
+    ;;       Version 1.2 Part 1: Core Language
+    ;;       W3C Working Draft 11 June 2003
+    ;;       This version: http://www.w3.org/TR/2003/WD-wsdl12-20030611
+    ;;
 
-  '(:net.xmp.wsdl
-    "wsdl"
-    "http://www.w3.org/2003/06/wsdl"
-    ;; A normative XML Schema [XML Schema: Structures], 
-    ;;   [XML Schema: Datatypes] document for the
-    ;;   "http://www.w3.org/2003/06/wsdl" namespace can be 
-    ;;   found at http://www.w3.org/2003/06/wsdl.
-    ;;   WSDL documents that do NOT conform to this schema are
-    ;;   not valid WSDL documents. WSDL documents that DO conform to
-    ;;   this schema and also conform to the other constraints defined
-    ;;   in this specification are valid WSDL documents.
-    )
-  '(:net.xmp.wsdl.soap
-    "soap12"
-    "http://www.w3.org/2003/06/wsdl/soap12"
-    ;; Defined by WSDL 1.2: Bindings [WSDL 1.2 Bindings].
-    )
-  ;; http "http://www.w3.org/2003/06/wsdl/http"
-  '(:net.xmp.wsdl.http "http" "http://www.w3.org/2003/06/wsdl/http")
+    '(:net.xmp.wsdl
+      "wsdl"
+      "http://www.w3.org/2003/06/wsdl"
+      ;; A normative XML Schema [XML Schema: Structures], 
+      ;;   [XML Schema: Datatypes] document for the
+      ;;   "http://www.w3.org/2003/06/wsdl" namespace can be 
+      ;;   found at http://www.w3.org/2003/06/wsdl.
+      ;;   WSDL documents that do NOT conform to this schema are
+      ;;   not valid WSDL documents. WSDL documents that DO conform to
+      ;;   this schema and also conform to the other constraints defined
+      ;;   in this specification are valid WSDL documents.
+      )
+    '(:net.xmp.wsdl.soap
+      "soap12"
+      "http://www.w3.org/2003/06/wsdl/soap12"
+      ;; Defined by WSDL 1.2: Bindings [WSDL 1.2 Bindings].
+      )
+    ;; http "http://www.w3.org/2003/06/wsdl/http"
+    '(:net.xmp.wsdl.http "http" "http://www.w3.org/2003/06/wsdl/http")
 
-  ;; mime "http://www.w3.org/2003/06/wsdl/mime"
-  '(:net.xmp.wsdl.mime "mime" "http://www.w3.org/2003/06/wsdl/mime")
+    ;; mime "http://www.w3.org/2003/06/wsdl/mime"
+    '(:net.xmp.wsdl.mime "mime" "http://www.w3.org/2003/06/wsdl/mime")
     
-  :soap
+    :soap
 
-  ))
+    ))
 
-(xmp-define-namespace-map
- :wsdl-namespaces t
- (list
-  nil
-  :wsdl1.2
-  :wsdl1.1
-  '(:net.xmp.wsdl.msstk
-    "stk"
-    "http://schemas.microsoft.com/soap-toolkit/wsdl-extension")
-  ))
-(xmp-define-namespace-map
- :wsdl1-namespaces t
- (list
-  nil
-  :wsdl1.1
-  :wsdl1.2
-  '(:net.xmp.wsdl.msstk
-    "stk"
-    "http://schemas.microsoft.com/soap-toolkit/wsdl-extension")
-  ))
+  (xmp-define-namespace-map
+   :wsdl-namespaces t
+   (list
+    nil
+    :wsdl1.2
+    :wsdl1.1
+    '(:net.xmp.wsdl.msstk
+      "stk"
+      "http://schemas.microsoft.com/soap-toolkit/wsdl-extension")
+    ))
+  (xmp-define-namespace-map
+   :wsdl1-namespaces t
+   (list
+    nil
+    :wsdl1.1
+    :wsdl1.2
+    '(:net.xmp.wsdl.msstk
+      "stk"
+      "http://schemas.microsoft.com/soap-toolkit/wsdl-extension")
+    ))
 
-(xmp-define-namespace-map :wsdl-combine t
-			  '(nil :wsdl-namespaces :all (:wsdl-def "tns" :any)))
-(xmp-define-namespace-map :wsdl-keyword t
-			  '(nil :wsdl-namespaces :all (:keyword "tns" :any)))
-(xmp-define-namespace-map :wsdl-prefix  t
-			  '(nil :wsdl-namespaces :all ("wsdl-" "tns" :prefix)))
-(xmp-define-namespace-map :wsdl1-combine t
-			  '(nil :wsdl1-namespaces :all (:wsdl-def "tns" :any)))
-(xmp-define-namespace-map :wsdl1-keyword t
-			  '(nil :wsdl1-namespaces :all (:keyword "tns" :any)))
-(xmp-define-namespace-map :wsdl1-prefix  t
-			  '(nil :wsdl1-namespaces :all ("wsdl-" "tns" :prefix)))
+  (xmp-define-namespace-map :wsdl-combine t
+			    '(nil :wsdl-namespaces :all (:wsdl-def "tns" :any)))
+  (xmp-define-namespace-map :wsdl-keyword t
+			    '(nil :wsdl-namespaces :all (:keyword "tns" :any)))
+  (xmp-define-namespace-map :wsdl-prefix  t
+			    '(nil :wsdl-namespaces :all ("wsdl-" "tns" :prefix)))
+  (xmp-define-namespace-map :wsdl1-combine t
+			    '(nil :wsdl1-namespaces :all (:wsdl-def "tns" :any)))
+  (xmp-define-namespace-map :wsdl1-keyword t
+			    '(nil :wsdl1-namespaces :all (:keyword "tns" :any)))
+  (xmp-define-namespace-map :wsdl1-prefix  t
+			    '(nil :wsdl1-namespaces :all ("wsdl-" "tns" :prefix)))
+
+
+  (define-xmp-element nil 'wsdl:|definitions|
+    '(:complex
+      (:seq
+       (:set* wsdl:|include| "import")
+       wsdl:|documentation|
+       (:element wsdl:|types| (:complex (:seq* xsd:|schema| (:any))))
+       (:set* wsdl:|message|
+	      (:or wsdl:|interface| wsdl:|portType|)
+	      wsdl:|binding|
+	      wsdl:|service|)
+       (:seq* (:any)))))
+
+  )
+(define-wsdl-names)
 
 (defun wsdl-base-namespaces (argnse)
   (if (and argnse (atom argnse))
@@ -342,7 +360,7 @@
 				(namespaces :decode)
 				(base :wsdl1-prefix)
 				(lisp-package :keyword)
-				xml-syntax
+				xml-syntax init (class 'wsdl-file-connector)
 				&aux (*xmp-warning-leader* "WSDL"))
   
 
@@ -379,13 +397,14 @@
 			  (cons "Missing namespaces:" missing))
 			)))))
 		(otherwise namespaces)))
-				   
-	 (conn (make-instance 'wsdl-file-connector
-			      :message-dns dns
-			      :base-dns base-dns
-			      :xml-syntax xml-syntax
-			      :source file :lisp-package lisp-package)))
-
+	 (conn (apply #'make-instance class
+		      :message-dns dns
+		      :base-dns base-dns
+		      :xml-syntax xml-syntax
+		      :source file :lisp-package lisp-package
+		      init)))
+    (or (typep conn 'wsdl-file-connector)
+	(error "Class of ~S is not sub-class of wsdl-file-connector" conn))
     (values-list
      (append
       (list conn)
@@ -420,17 +439,7 @@
 
 
 
-(define-xmp-element nil 'wsdl:|definitions|
-  '(:complex
-    (:seq
-     (:set* wsdl:|include| "import")
-     wsdl:|documentation|
-     (:element wsdl:|types| (:complex (:seq* xsd:|schema| (:any))))
-     (:set* wsdl:|message|
-	    (:or wsdl:|interface| wsdl:|portType|)
-	    wsdl:|binding|
-	    wsdl:|service|)
-     (:seq* (:any)))))
+
 
 (defmethod xmp-simple-content ((conn wsdl-file-connector)
 			       (elt (eql 'wsdl:|documentation|)) data
@@ -1148,26 +1157,31 @@
 		(setf comment
 		      (list (format nil "Send client message ~A " op-name)
 			    op-name))
-		`(defun ,def-name 
-		   (&key ,@key-args)
-		   (let ((,(wsdl-intern-name conn "conn")
-			  (soap-message-client 
-			   :url ,(wsdl-url-name conn)
-			   :message-dns ,(qt (wsdl-map-name conn))
-			   ,@(wsdl-client-options conn)
-			   )))
-		     (multiple-value-call
-		      #'values
-		      ,(if (and one-def (not (string-equal style "document")))
-			   `(call-soap-method ,(wsdl-intern-name conn "conn")
-					      ,(qt op-rename)
-					      ,(string (part-name one-part))
-					      (list ,@arglist))
-			 `(call-soap-method
-			   ,(wsdl-intern-name conn "conn")
-			   ,(qt op-rename)
-			   ,@arglist))
-		      ,(wsdl-intern-name conn "conn")))))
+		(wsdl-generate-code 
+		 conn mode :top-level
+		 'defun def-name 
+		 `(&key ,@key-args)
+		 `(let ((,(wsdl-intern-name conn "conn")
+			 ,(apply #'wsdl-generate-code 
+				 conn mode nil 
+				 'soap-message-client 
+				 (list*
+				  :url (wsdl-url-name conn)
+				  :message-dns (qt (wsdl-map-name conn))
+				  (wsdl-client-options conn)
+				  ))))
+		    (multiple-value-call
+		     #'values
+		     ,(if (and one-def (not (string-equal style "document")))
+			  `(call-soap-method ,(wsdl-intern-name conn "conn")
+					     ,(qt op-rename)
+					     ,(string (part-name one-part))
+					     (list ,@arglist))
+			`(call-soap-method
+			  ,(wsdl-intern-name conn "conn")
+			  ,(qt op-rename)
+			  ,@arglist))
+		     ,(wsdl-intern-name conn "conn")))))
 	       (:server
 		(let* ((one-ret (and out-parts
 				     (null (cdr out-parts))
@@ -1234,25 +1248,29 @@
 		      (let* ((one-part-name (part-name one-part))
 			     (one-part-var (wsdl-intern-name
 					    conn (string one-part-name))))
-			`(defun ,def-name (&key ((,one-part-name ,one-part-var)))
-			   (apply #'(lambda (&key ,@key-list)
-				      (let ,ret-vars
-					"INSERT BODY HERE"
-					,(if (and ret-def
-						  (not (string-equal style "document")))
-					     `(list
-					       ,(string (part-name (first out-parts)))
-					       (list ,@ret-parts))
-					   `(list ,@ret-parts))))
-				  ,one-part-var)))
+			(wsdl-generate-code 
+			 conn mode :top-body
+			 'defun def-name `(&key ((,one-part-name ,one-part-var)))
+			 `(apply #'(lambda (&key ,@key-list)
+				     (let ,ret-vars
+				       "INSERT BODY HERE"
+				       ,(if (and ret-def
+						 (not (string-equal style "document")))
+					    `(list
+					      ,(string (part-name (first out-parts)))
+					      (list ,@ret-parts))
+					  `(list ,@ret-parts))))
+				 ,one-part-var)))
 
-		    `(defun ,def-name (&key ,@key-list)
-		       (let ,ret-vars
-			 "INSERT BODY HERE"
-			 ,(if (and ret-def (not (string-equal style "document")))
-			      `(list ,(string (part-name (first out-parts)))
-				     (list ,@ret-parts))
-			    `(list ,@ret-parts))))
+		    (wsdl-generate-code 
+		     conn mode :top-body
+		     'defun def-name `(&key ,@key-list)
+		     `(let ,ret-vars
+			"INSERT BODY HERE"
+			,(if (and ret-def (not (string-equal style "document")))
+			     `(list ,(string (part-name (first out-parts)))
+				    (list ,@ret-parts))
+			   `(list ,@ret-parts))))
 
 		    )
 
@@ -1262,6 +1280,10 @@
 	       ))
 	   comment)))
       )))
+
+(defmethod wsdl-generate-code ((conn wsdl-file-connector) (mode t) (info t)
+			       (op t) &rest args)
+  (cons op args))
 
 
 (defmethod wsdl-service-binding-names ((conn wsdl-file-connector) sdef port
@@ -1698,30 +1720,34 @@
 	    (:server
 	     (wsdl-index-form
 	      conn
-	      `(defun ,(wsdl-compose-name conn nil prefix "make-server")
-		 (&optional (,(wsdl-intern-name conn "port") 8080))
-		 (let ((,(wsdl-intern-name conn "s")
-			(soap-message-server
-			 :start (list :port ,(wsdl-intern-name conn "port"))
-			 :enable :start
-			 :publish (list :path
-					,(xmp-resolve-uri (wsdl-soap-address conn)
-							  :path))
-			 ,@(when action (list :action action))
-			 :lisp-package :keyword
-			 ,@(if message-dns
-			       (list :message-dns (list 'quote message-dns))
-			     (list :message-dns 
-				   (list 'quote (wsdl-map-name conn)))
-			     )
-			 ,@(when body-form (list :body-form body-form))
-			 )))
-		   ,@(mapcar #'(lambda (ex)
-				 (list* 'soap-export-method
-					(wsdl-intern-name conn "s")
-					ex))
-			     (wsdl-server-exports conn))
-		   ,(wsdl-intern-name conn "s"))))))
+	      (wsdl-generate-code
+	       conn mode :top-level
+	       'defun (wsdl-compose-name conn nil prefix "make-server")
+	       `(&optional (,(wsdl-intern-name conn "port") 8080))
+	       `(let ((,(wsdl-intern-name conn "s")
+		       ,(apply #'wsdl-generate-code
+			       conn mode nil
+			       'soap-message-server
+			       :start (list 'list :port (wsdl-intern-name conn "port"))
+			       :enable :start
+			       :publish (list 'list :path
+					      (xmp-resolve-uri (wsdl-soap-address conn)
+							       :path))
+				
+			       :lisp-package :keyword
+			       (append 
+				(when action (list :action action))
+				(list :message-dns
+				      (list 'quote
+					    (or message-dns (wsdl-map-name conn))))
+				(when body-form (list :body-form body-form)))
+			       )))
+		  ,@(mapcar #'(lambda (ex)
+				(list* 'soap-export-method
+				       (wsdl-intern-name conn "s")
+				       ex))
+			    (wsdl-server-exports conn))
+		  ,(wsdl-intern-name conn "s"))))))
 						   
 	  (when (wsdl-undef-ns conn)
 	    (case if-missing-package
@@ -1809,34 +1835,6 @@
 			      "will almost certainly fail.")))
 		 "WARNING"))
 
-	      #+ignore
-	      (let (maybe-conflicts)
-		(cond ((eq *current-case-mode* :case-insensitive-upper)
-		       (do-file 
-			`((eval-when (compile load eval)
-			    (or (eq *current-case-mode* :case-insensitive-upper)
-				(error
-				 "~A~A"
-				 "This file makes sense only when "
-				 "*current-case-mode* is :case-insensitive-upper")))
-			  "WARNING")))
-		      ((consp (setf maybe-conflicts (wsdl-maybe-conflicts conn)))
-		       (wsdl-print-lines
-			(dstream) nil
-			"The following symbol names may cause problems in ANSI case-mode:"
-			(sort maybe-conflicts #'string-lessp)))
-		      (t (wsdl-print-lines 
-			  (dstream) ";;; "
-			  1
-			  "Mixed case symbol names are NOT escaped in this file,"
-			  "but there do not appear to be any case-sensitivity"
-			  "conflicts."
-			  ""
-			  "It MAY be possible to load this file into an ANSI ACL image"
-			  "(where all symbols will be case-folded to uppercase)."
-			  1
-			  ))
-		      ))
 	      (when (wsdl-overloaded-ops conn)
 		(multiple-value-call
 		 #'wsdl-print-lines (dstream) ";;; " 1
@@ -1969,57 +1967,65 @@
 	   )
 	 (wsdl-index-form
 	  conn
-	  `(defclass ,type-name (,class)
-	     ( ,@(mapcar #'(lambda (name key reader writer)
-			     (list name
-				   :reader reader
-				   :writer writer
-				   :initarg key
-				   :initform nil))
-			 names keys readers writers)
-		 )))
+	  (wsdl-generate-code
+	   conn :object-class :top-level
+	   'defclass type-name `(,class)
+	   `( ,@(mapcar #'(lambda (name key reader writer)
+			    (list name
+				  :reader reader
+				  :writer writer
+				  :initarg key
+				  :initform nil))
+			names keys readers writers)
+		)))
 	 (net.xmp.soap::wsdl-index-form
 	  conn
-	  `(defun ,new-name (&key ,@names)
-	     (make-instance ,(qt class-name)
+	   (wsdl-generate-code
+	    conn :object-new :top-level
+	    'defun new-name `(&key ,@names)
+	    `(make-instance ,(qt class-name)
 			    ,@(mapcan #'(lambda (key name) (list key name))
 				      keys names))))
 	 (wsdl-index-form
 	  conn
 	  (let ((cvar (wsdl-intern-name conn "conn"))
 		(fvar (wsdl-intern-name conn "soap-result")))
-	    `(defmethod ,decode-name
-	       ,(if cclass
-		    (list (list cvar cclass) (list fvar t))
-		  (list (list cvar t) (list fvar t)))
-	       (make-instance
-		,(qt class-name)
-		,@(mapcan #'(lambda (key elt etype
-					 &aux
-					 (part (list 'soap-result-typed
-						     cvar fvar
-						     (list 'quote etype)
-						     (case (wsdl-option conn :sequence)
-						       (:set* nil)
-						       (otherwise :error))
-						     (string elt)))
-					 )
-			      (when (member etype defclass-names)
-				(setf part (list (wsdl-compose-name
-						  conn nil :decode- (string etype))
-						 cvar part)))
-			      (list key part))
-			  keys elts etypes)))))
+	    (wsdl-generate-code
+	     conn :object-decoder :top-level
+	     'defmethod decode-name
+	     (if cclass
+		 (list (list cvar cclass) (list fvar t))
+	       (list (list cvar t) (list fvar t)))
+	     `(make-instance
+	       ,(qt class-name)
+	       ,@(mapcan #'(lambda (key elt etype
+					&aux
+					(part (list 'soap-result-typed
+						    cvar fvar
+						    (list 'quote etype)
+						    (case (wsdl-option conn :sequence)
+						      (:set* nil)
+						      (otherwise :error))
+						    (string elt)))
+					)
+			     (when (member etype defclass-names)
+			       (setf part (list (wsdl-compose-name
+						 conn nil :decode- (string etype))
+						cvar part)))
+			     (list key part))
+			 keys elts etypes)))))
 	 (net.xmp.soap::wsdl-index-form
 	  conn
 	  (let ((fvar (wsdl-intern-name conn "instance")))
-	    `(defmethod ,encoder ((,fvar ,type-name))
-	       (list ,@(mapcan #'(lambda (elt acc etype 
-					      &aux (part (list acc fvar)))
-				   (when (member etype defclass-names)
-				     (setf part (list encoder part)))
-				   (list (string elt) part))
-			       elts readers etypes)))))
+	    (wsdl-generate-code
+	     conn :object-encoder :top-level
+	     'defmethod encoder `((,fvar ,type-name))
+	     `(list ,@(mapcan #'(lambda (elt acc etype 
+					     &aux (part (list acc fvar)))
+				  (when (member etype defclass-names)
+				    (setf part (list encoder part)))
+				  (list (string elt) part))
+			      elts readers etypes)))))
 	 t) ;;; end match :complex
 	(with-tree-match
 	 (type (:array (:? atype) . :?any))
@@ -2034,18 +2040,22 @@
 
 	     (net.xmp.soap::wsdl-index-form
 	      conn
-	      `(defclass ,type-name (,class soap-array-mixin)
-		 ((items :accessor ,iname))))
+	      (wsdl-generate-code
+	       conn :object-type :top-level
+	       'defclass type-name `(,class soap-array-mixin)
+	       `((items :accessor ,iname))))
 
 	     (setf new-name (wsdl-compose-name conn nil "new-" (string type-name)))
 	     (net.xmp.soap::wsdl-index-form
 	      conn
 	      (let ((ivar (wsdl-intern-name conn "items")))
-		`(defun ,new-name (&rest ,ivar)
-		   (when (and ,ivar (null (cdr ,ivar))
-			      (typep (first ,ivar) 'sequence))
-		     (setf ,ivar (concatenate 'list (first ,ivar))))
-		   (make-instance ,(qt class-name) :items ,ivar))))
+		(wsdl-generate-code
+		 conn :object-new :top-level
+		 'defun new-name `(&rest ,ivar)
+		 `(when (and ,ivar (null (cdr ,ivar))
+			     (typep (first ,ivar) 'sequence))
+		    (setf ,ivar (concatenate 'list (first ,ivar))))
+		 `(make-instance ,(qt class-name) :items ,ivar))))
 	     (net.xmp.soap::wsdl-index-form
 	      conn
 	      (let ((cvar (wsdl-intern-name conn "conn"))
@@ -2056,30 +2066,34 @@
 		    (tvar (wsdl-intern-name conn "tail"))
 		    )
 	     
-		`(defmethod ,decode-name
-		   ,(if cclass
-			(list (list cvar cclass) (list fvar t))
-		      (list (list cvar t) (list fvar t)))
-		   (make-instance ,(qt class-name)
-				  :items
-				  (let ((,ivar (concatenate 'list ,fvar nil)))
-				    ,(if array-of-built-in-type
-					 ivar
-				       `(do ((,tvar ,ivar (cdr ,tvar)))
-					    ((null ,tvar) ,ivar)
-					  (setf (car ,tvar)
-						(,aname ,cvar (car ,tvar))))))
-				  ))))
+		(wsdl-generate-code
+		 conn :object-decoder :top-level
+		 'defmethod decode-name
+		 (if cclass
+		     (list (list cvar cclass) (list fvar t))
+		   (list (list cvar t) (list fvar t)))
+		 `(make-instance ,(qt class-name)
+				 :items
+				 (let ((,ivar (concatenate 'list ,fvar nil)))
+				   ,(if array-of-built-in-type
+					ivar
+				      `(do ((,tvar ,ivar (cdr ,tvar)))
+					   ((null ,tvar) ,ivar)
+					 (setf (car ,tvar)
+					       (,aname ,cvar (car ,tvar))))))
+				 ))))
 	     (net.xmp.soap::wsdl-index-form
 	      conn
 	      (let ((fvar (wsdl-intern-name conn "instance"))
 		    (ivar (wsdl-intern-name conn "item")))
-		`(defmethod ,encoder ((,fvar ,type-name))
-		   ,(if array-of-built-in-type
-			`(,iname ,fvar)
-		      `(mapcar #'(lambda (,ivar) (,encoder ,ivar)) 
-			       (,iname ,fvar)))
-		   )))
+		(wsdl-generate-code
+		 conn :object-encoder :top-level
+		 'defmethod encoder `((,fvar ,type-name))
+		 (if array-of-built-in-type
+		     `(,iname ,fvar)
+		   `(mapcar #'(lambda (,ivar) (,encoder ,ivar)) 
+			    (,iname ,fvar)))
+		 )))
 	     t))) ;;; end match :array
 	)
        )))
@@ -2245,18 +2259,20 @@
 		    
   (wsdl-index-form
    conn
-   `(defmethod ,(wsdl-compose-name conn nil mprefix (string  msg))
-      (,@(mapcar #'(lambda (elt)
-		     (list (wsdl-compose-name conn nil (first (second elt)))
-			   (if (member (third elt) structs)
-			       (third elt)
-			     t)))
-		 parts))
-      (multiple-value-bind (,bvar ,hvar ,cvar) 
-	  ,call
-	(values ,res ,hvar ,cvar))
+   (wsdl-generate-code
+    conn :object-wrapper :top-level
+    'defmethod (wsdl-compose-name conn nil mprefix (string  msg))
+    `(,@(mapcar #'(lambda (elt)
+		    (list (wsdl-compose-name conn nil (first (second elt)))
+			  (if (member (third elt) structs)
+			      (third elt)
+			    t)))
+		parts))
+    `(multiple-value-bind (,bvar ,hvar ,cvar) 
+	 ,call
+       (values ,res ,hvar ,cvar))
 
-      ))
+    ))
   )
 
 
@@ -3045,3 +3061,17 @@
       (incf (wsdl-warnings conn))
     (setf (wsdl-warnings conn) 1))
   (apply 'warn fmt))
+
+
+;;; This is defined here instead of in xmp-soap.cl 
+;;;  because we want to call define-wsdl-names as well.
+(defun soap-new-environment ()
+  (setf *soap-server* nil
+	*soap-last-server* nil
+	)
+  (xmp-new-environment)
+
+  (net.xmp::define-schema-elements)
+  (define-soap-names)
+  (define-wsdl-names)
+  nil)

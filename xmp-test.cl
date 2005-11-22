@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.7 2005/11/22 00:48:04 mm Exp $
+;; $Id: xmp-test.cl,v 2.8 2005/11/22 22:25:26 mm Exp $
 
 ;; Internal-use test cases
 
@@ -39,24 +39,12 @@
     )
   )
 
-(eval-when (compile)
+(eval-when (compile load eval)
   ;; always compile these to avoid casemode problems
   (load (compile-file "xmp-mtest.cl"))
-  (load (compile-file "soapval1.cl"))
   (load (compile-file "soapex.cl"))
-  (load (compile-file "bignum-server.cl"))
-  )
-(eval-when (eval)
-  (load (compile-file "xmp-mtest.cl"))
   (load (compile-file "soapval1.cl"))
-  (load (compile-file "soapex.cl"))
   (load (compile-file "bignum-server.cl"))
-  )
-(eval-when (load)
-  (load "xmp-mtest")
-  (load "soapval1")
-  (load "soapex")
-  (load "bignum-server")
   )
 
 (defpackage :user (:use :net.xmp.soap  :util.test)) 
@@ -66,6 +54,9 @@
 (defpackage :net.xmp.soap.none (:use) (:nicknames :none))
 (defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
 (defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
+
+(defpackage :temp (:use))
+(defpackage :gg (:use))
 
 #|
 
@@ -144,7 +135,6 @@ Individual tests:
    (test nil (null (ss1 :index :all)))
    (test nil (null (ss2)))
    (test :all-ok (test-validator1))
-   (test nil (null (funcall 'start-server)))
    (test t (test-bn))
    (test-no-error (stop-soap-server (symbol-value '*bn-server*)))
    ))
@@ -189,6 +179,7 @@ Individual tests:
 	
 
 (defun test-bn ()
+  (load (compile-file "bignum-server.cl"))
   (let* ((server (start-server))
 	(r (try-server))
 	(v (and (equal (format nil "~A" (apply 'factorial 17 0 nil))
@@ -220,11 +211,15 @@ Individual tests:
 (defmethod net.xmp:xmp-begin-message ((conn ct1)) (list :seq1 (list :or :ct1 :ct2)))
 (defmethod net.xmp:xmp-end-message ((conn ct1) data &key types &allow-other-keys)
   (values data types))			       
-(net.xmp:define-xmp-element nil :ct1 '(:complex 
-				       (:or 
-					(:seq (:element :foo xsd:|int|) :bar)
-					(:seq (:element :foo xsd:|string|) :baz))))
+
 (defun ct1 ()
+
+  (net.xmp:define-xmp-element
+   nil :ct1 '(:complex 
+	      (:or 
+	       (:seq (:element :foo xsd:|int|) :bar)
+	       (:seq (:element :foo xsd:|string|) :baz))))
+  
   (let* ((conn (make-instance 'ct1)))
     (list
      (net.xmp::xmp-decode-message
@@ -238,25 +233,50 @@ Individual tests:
 ;;; This kind of definition should be avoided (or prohibited)
 ;;;      element foo has two conflicting definitions.
 ;;; This is not legal in XML Schema definition.
-(net.xmp:define-xmp-element nil :ct2 '(:complex (:or (:seq (:element 
-						    :foo 
-						    (:complex (:seq :bar :baz)))
-						   :bob)
-					     (:seq (:element 
-						    :foo 
-						    (:complex (:seq :baz :bar)))
-						   :box))))
 (defun ct2 () 
+
+  (net.xmp:define-xmp-element
+   nil :ct2 '(:complex (:or (:seq (:element 
+				   :foo 
+				   (:complex (:seq :bar :baz)))
+				  :bob)
+			    (:seq (:element 
+				   :foo 
+				   (:complex (:seq :baz :bar)))
+				  :box))))
+
   (let* ((conn (make-instance 'ct1)))
     (net.xmp::xmp-decode-message
      conn
      '((:ct2 (:foo (:bar "bar") (:baz "baz")) (:bob "bob"))))))
 (defun ct3 () 
+
+  (net.xmp:define-xmp-element
+   nil :ct2 '(:complex (:or (:seq (:element 
+				   :foo 
+				   (:complex (:seq :bar :baz)))
+				  :bob)
+			    (:seq (:element 
+				   :foo 
+				   (:complex (:seq :baz :bar)))
+				  :box))))
+
   (let* ((conn (make-instance 'ct1)))
     (net.xmp::xmp-decode-message
      conn
      '((:ct2 (:foo (:baz "baz") (:bar "bar")) (:box "box"))))))
 (defun ct4 () 
+
+  (net.xmp:define-xmp-element
+   nil :ct2 '(:complex (:or (:seq (:element 
+				   :foo 
+				   (:complex (:seq :bar :baz)))
+				  :bob)
+			    (:seq (:element 
+				   :foo 
+				   (:complex (:seq :baz :bar)))
+				  :box))))
+
   ;; should fail
   (let* ((conn (make-instance 'ct1)))
     (net.xmp::xmp-decode-message
@@ -270,19 +290,23 @@ Individual tests:
 ;;; SOAP Server Tests
 
 (defpackage :ss1 (:use))
-(define-namespace :ss1 "ss1" "urn:SS1NS")
-(define-soap-element nil 'ss1::soap-method-1
-  '(:complex (:seq (:element :|elt1| xsd:|int|)
-		   (:element :|elt2| xsd:|int|)
-		   (:element :|elt3| xsd:|int|)
-		   )
-	     :action "uri:method1"
-	     ))
-(define-soap-element nil 'ss1::soap-result-1 
-  '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+
 (defun soap-method-1 (&key (|elt1| 0) (|elt2| 0) (|elt3| 0))
   (list 'ss1::result (+ |elt1| |elt2| |elt3|)))
+
 (defun ss1 (&key (index 1 )(port 4567) (path "/SOAP") debug (stop t))
+
+  (define-namespace :ss1 "ss1" "urn:SS1NS")
+  (define-soap-element nil 'ss1::soap-method-1
+    '(:complex (:seq (:element :|elt1| xsd:|int|)
+		     (:element :|elt2| xsd:|int|)
+		     (:element :|elt3| xsd:|int|)
+		     )
+	       :action "uri:method1"
+	       ))
+  (define-soap-element nil 'ss1::soap-result-1 
+    '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+
   (let* ((url (format nil "http://localhost:~A~A" port path))
 	 (server (soap-message-server :start `(:port ,port)
 				      :publish `(:path ,path)
@@ -350,6 +374,7 @@ Individual tests:
     ))
 
 (defun ss2 () 
+  (load (compile-file "soapex.cl"))
   (and (simple-server :ns 0)
        (simple-server :ns 1)
        (null (simple-server :ns 2))))
@@ -357,17 +382,20 @@ Individual tests:
 
 
 
-(define-soap-element nil 'ss1::soap-method-3
-  '(:complex (:seq (:element :|elt1| xsd:|string|))
-	     :action "uri:method3"
-	     ))
-(define-soap-element nil 'ss1::soap-result-3 
-  '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
-(defun soap-method-3 (&key |elt1|)
-  (list 'ss1::result (length  |elt1|)))
+
 
 ;; Manual test - no simple way to predict all results 
 (defun run3 (count &rest keys)
+
+  (define-soap-element nil 'ss1::soap-method-3
+    '(:complex (:seq (:element :|elt1| xsd:|string|))
+	       :action "uri:method3"
+	       ))
+  (define-soap-element nil 'ss1::soap-result-3 
+    '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+  (defun soap-method-3 (&key |elt1|)
+    (list 'ss1::result (length  |elt1|)))
+
   (mapcar #'(lambda (args)
 	      (apply #'(lambda (init extend)
 			 (prof:with-profiling
@@ -395,6 +423,16 @@ Individual tests:
 		 (length 20000)
 		 (init nil) (extend nil)
 		 (port 4567) (path "/SOAP") debug (stop t))
+
+  (define-soap-element nil 'ss1::soap-method-3
+    '(:complex (:seq (:element :|elt1| xsd:|string|))
+	       :action "uri:method3"
+	       ))
+  (define-soap-element nil 'ss1::soap-result-3 
+    '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+  (defun soap-method-3 (&key |elt1|)
+    (list 'ss1::result (length  |elt1|)))
+
   (let* ((oldlog net.aserve::*enable-logging*)
 	 (url (format nil "http://localhost:~A~A" port path))
 	 (server (soap-message-server :start `(:port ,port)
@@ -417,15 +455,15 @@ Individual tests:
 	    ;; make a new client each time around to start with fresh
 	    ;; message buffer each time
 	    (setf client (soap-message-client :url url
-					    :lisp-package :keyword
-					    :message-dns '(nil (:ss1))
-					    :message-init
-					    (if extend (list init extend) init)
-					    :soap-debug
-					    (case debug
-					      ((:server nil) nil)
-					      (otherwise t))
-					    ))
+					      :lisp-package :keyword
+					      :message-dns '(nil (:ss1))
+					      :message-init
+					      (if extend (list init extend) init)
+					      :soap-debug
+					      (case debug
+						((:server nil) nil)
+						(otherwise t))
+					      ))
 	    (or (eql
 		 length
 		 (soap-result-only
@@ -448,16 +486,19 @@ Individual tests:
 
 ;;??? test encoders for anyType
 
-(define-soap-element nil 'ss1::soap-method-4
-  '(:complex (:seq (:element :|elt1| xsd:|anyType|))
-	     :action "uri:method4"
-	     ))
-(define-soap-element nil 'ss1::soap-result-4 
-  '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+
 (defun soap-method-4 (&key |elt1|)
   (list 'ss1::result (typecase |elt1| (sequence (length  |elt1|)) (otherwise -1))))
 
 (defun ss4 (&key log (init nil) (extend nil) (path "/SOAP") debug (stop t))
+
+  (define-soap-element nil 'ss1::soap-method-4
+    '(:complex (:seq (:element :|elt1| xsd:|anyType|))
+	       :action "uri:method4"
+	       ))
+  (define-soap-element nil 'ss1::soap-result-4 
+    '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+
   (let* ((oldlog net.aserve::*enable-logging*)
 	 (server (soap-message-server :start `(:port 0)
 				      :publish `(:path ,path)
@@ -479,9 +520,9 @@ Individual tests:
 	(let* (client result (length 17)
 		      (string (make-string length :initial-element #\a)))
 	    
-	    ;; make a new client each time around to start with fresh
-	    ;; message buffer each time
-	    (setf client (soap-message-client :url url
+	  ;; make a new client each time around to start with fresh
+	  ;; message buffer each time
+	  (setf client (soap-message-client :url url
 					    :lisp-package :keyword
 					    :message-dns '(nil (:ss1))
 					    :message-init
@@ -491,26 +532,26 @@ Individual tests:
 					      ((:server nil) nil)
 					      (otherwise t))
 					    ))
-	    (or (eql
-		 length
-		 (soap-result-only
-		  client 
-		  (setf 
-		   result
-		   (call-soap-method 
-		    client 'ss1::soap-method-4 :|elt1| string))
-		  t 'ss1::soap-result-4 'ss1::result))
-		(error "Not eql ~S ~S" length result))
-	    (or (eql
-		 2
-		 (soap-result-only
-		  client 
-		  (setf 
-		   result
-		   (call-soap-method 
-		    client 'ss1::soap-method-4 :|elt1| 17))
-		  t 'ss1::soap-result-4 'ss1::result))
-		(error "Not eql ~S ~S" length result))
+	  (or (eql
+	       length
+	       (soap-result-only
+		client 
+		(setf 
+		 result
+		 (call-soap-method 
+		  client 'ss1::soap-method-4 :|elt1| string))
+		t 'ss1::soap-result-4 'ss1::result))
+	      (error "Not eql ~S ~S" length result))
+	  (or (eql
+	       2
+	       (soap-result-only
+		client 
+		(setf 
+		 result
+		 (call-soap-method 
+		  client 'ss1::soap-method-4 :|elt1| 17))
+		t 'ss1::soap-result-4 'ss1::result))
+	      (error "Not eql ~S ~S" length result))
 
 	  :ok)
       (and stop server (stop-soap-server server))
@@ -562,18 +603,42 @@ Individual tests:
     (values-list res)))
 	 
 
-(defun wsdl11 ()
+(defun wsdl11 (&optional (file "ss1.wsdl"))
   
-  (encode-wsdl-file "ss1.wsdl"
+  (encode-wsdl-file file
 		    :servers (list "SS1" (nth-value 1 (ss1 :index 17)))
 		    :target "urn:SS1NS"
 		    ))
+
+
+(defclass ss1-class (wsdl-file-connector) ())
+(defmethod wsdl-generate-code ((conn ss1-class) (mode (eql :client)) (info t)
+			       (op (eql 'soap-message-client)) &rest args)
+  (list* op :more "more" args))
+(defun wsdl11a ()
+  (wsdl11 "ss1-test.wsdl")
+  (soap-new-environment)
+  (make-client-interface 
+   (decode-wsdl-file "ss1-test.wsdl")
+   0
+   "ss1-test1.cl"
+   )
+  (soap-new-environment)
+  (make-client-interface 
+   (decode-wsdl-file "ss1-test.wsdl" :class 'ss1-class)
+   0
+   "ss1-test2.cl"
+   )
+  )
+
+
 (defun wsdl12 ()
   (encode-wsdl-file "ss2.wsdl"
 		    :servers (nth-value 1 (simple-server :ns 1))
 		    :target :ts
 		    ))
 (defun wsdl13 ()
+  (load (compile-file "soapval1.cl"))
   (encode-wsdl-file "ssv.wsdl"
 		    :servers (make-validator1-server)
 		    :target :keyword
@@ -662,13 +727,13 @@ Individual tests:
       (run-one 10 (sp10) temp::|getTempResponse|)
       ;;(run-one 21 (sp21) baseball::|GetTeamsResponse|)
       ;;(run-one 22 (sp22) baseball::|GetPlayersResponse|)
-      (run-one 30 (sp30) temp:|getRateResponse|)
+      (run-one 30 (sp30) temp::|getRateResponse|)
       (run-one 40 (sp40) temp::|getVersionResponse|)
       ;;(run-one 51 (sp51) temp:|SearchRecipesResponse|)
       ;; (run-one 52 (sp52 id))
-      (run-one 61 (gs)  gg:|doGoogleSearchResponse|)
-      (run-one 62 (gsp) gg:|doSpellingSuggestionResponse|)
-      (run-one 63 (gcp) gg:|doGetCachedPageResponse|)
+      (run-one 61 (gs)  gg::|doGoogleSearchResponse|)
+      (run-one 62 (gsp) gg::|doSpellingSuggestionResponse|)
+      (run-one 63 (gcp) gg::|doGetCachedPageResponse|)
 
       (format t "~%;;; ~S client tests failed.~%" fail)
       (if val-p (values-list answer) (eql 0 fail))
@@ -701,6 +766,7 @@ Individual tests:
 			     (verbose nil)
 			     (error-p t)
 			     &aux fail)
+  (load (compile-file "soapval1.cl"))
   (let ((oldlog net.aserve::*enable-logging*))
     (unwind-protect
 	(let ()

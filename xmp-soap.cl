@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.8 2005/11/22 00:48:04 mm Exp $
+;; $Id: xmp-soap.cl,v 2.9 2005/11/22 22:25:26 mm Exp $
 
 ;; SOAP support
 
@@ -208,6 +208,7 @@
    soap-get-attribute 
    soap-get-attributes 
    soap-make-fault
+   soap-new-environment
 
    *soap-server-debug*
    *soap-client-debug*
@@ -310,70 +311,6 @@
   (defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
   )
 
-(xmp-define-namespace-map 
- :schema1999
- t  
- (list
-  nil
-  (list :net.xmp.schema
-	"xsd"
-	"http://www.w3.org/1999/XMLSchema")
-  (list :net.xmp.schema
-	"xsd"
-	"http://www.w3.org/1999/XMLSchema/")
-  (list :net.xmp.schema-instance
-	"xsi"
-	"http://www.w3.org/1999/XMLSchema-instance")))
-
-(xmp-define-namespace-map
- :schema2000
- t  
- (list
-  nil
-  (list :net.xmp.schema
-	"xsd"
-	"http://www.w3.org/2001/XMLSchema")
-  (list :net.xmp.schema
-	"xsd"
-	"http://www.w3.org/2001/XMLSchema/")
-  (list :net.xmp.schema-instance
-	"xsi"
-	"http://www.w3.org/2001/XMLSchema-instance")))
-
-(xmp-define-namespace-map
- :schema t  
- (list nil :schema2000 :schema1999))
-
-(xmp-define-namespace-map
- :schema1 t  
- (list nil :schema1999 :schema2000))
-
-(xmp-define-namespace-map
- :soap1.2 t  
- (list
-  nil
-  (list :net.xmp.soap.envelope
-	"SOAP-ENV"
-	"http://schemas.xmlsoap.org/soap/envelope/")
-  (list :net.xmp.soap.encoding
-	"SOAP-ENC"
-	"http://schemas.xmlsoap.org/soap/encoding/")
-  ))
-
-(xmp-define-namespace-map
- :soap1.1 t  
- (list
-  nil
-  (list :net.xmp.soap.envelope
-	"SOAP-ENV"
-	"http://schemas.xmlsoap.org/soap/envelope/")
-  (list :net.xmp.soap.encoding
-	"SOAP-ENC"
-	"http://schemas.xmlsoap.org/soap/encoding/")
-  ))
-
-(xmp-define-namespace-map :soap  t (list nil :soap1.2 :soap1.1 :schema))
-(xmp-define-namespace-map :soap1 t (list nil :soap1.1 :soap1.2 :schema))
 
  
 (def-xmp-sub-classes ("soap" "connector") (("xmp" "connector"))
@@ -504,22 +441,6 @@
 
 
 
-(define-xmp-element nil 'env:|Envelope| '(:complex
-					  (:seq (:seq* env:|Header|)
-						env:|Body|
-						(:seq* (:any)))))
-(define-xmp-element nil 'env:|Header|   (xmp-any-type nil))
-(define-xmp-element nil 'env:|Body|     (xmp-any-type nil))
-(define-xmp-element nil 'env:|Fault|    '(:complex
-					  (:set
-					   (:element "faultcode"   enc:|QName|)
-					   (:element "faultstring" enc:|string|)
-					   (:element "faultactor" enc:|string|)
-					   (:element "detail" (:complex (:seq* (:any))))
-					   (:seq* (:any))
-					   )))
-(define-xmp-element nil "multiRef"    '(:complex (:seq* (:any))))
-(define-xmp-type    nil 'enc:|Array|  '(:complex (:seq* (:any))))
 
 (define-condition soap-client-error (xmp-client-condition) 
   ((xmp-error-code :initform 'env:|Client|)))
@@ -1518,7 +1439,7 @@
     (:empty nil)
     (otherwise (call-next-method))))
 
-
+(eval-when (compile load eval) (defvar *soap-deftypes* nil))
 (defmacro def-soap-simple-content (elt &key class keywords
 				       (decode-class class) (decode-keys keywords)
 				       decode
@@ -1538,8 +1459,13 @@
 	   (setf elt (first tl))
 	   (when (cdr tl)
 	     (push `(define-soap-type nil ',elt '(:simple ,lastelt))
-		   res))))
-     (define-soap-type nil ',elt '(:simple  nil :simple-content-key ,elt))
+		   res)
+	     (push (first res) *soap-deftypes*)
+	     )))
+     ,(let ((def `(define-soap-type
+		    nil ',elt '(:simple  nil :simple-content-key ,elt))))
+	(push def *soap-deftypes*)
+	def)
      ,@(when decode
 
 	 ;; These methods assume that the entire content will be presented
@@ -1555,8 +1481,7 @@
 				  &key ,@encode-keys &allow-other-keys)
 	     ,@encode)))))
 
-(define-soap-type nil 'xsd:|ur-type| (xmp-any-type nil))
-(define-soap-type nil 'xsd:|anyType| (xmp-any-type nil))
+
 
 (def-soap-simple-content (enc:|QName| xsd:|QName|)
   :class soap-connector
@@ -2687,3 +2612,95 @@
     l))
 
 
+(defun define-soap-names ()
+
+  (xmp-define-namespace-map 
+   :schema1999
+   t  
+   (list
+    nil
+    (list :net.xmp.schema
+	  "xsd"
+	  "http://www.w3.org/1999/XMLSchema")
+    (list :net.xmp.schema
+	  "xsd"
+	  "http://www.w3.org/1999/XMLSchema/")
+    (list :net.xmp.schema-instance
+	  "xsi"
+	  "http://www.w3.org/1999/XMLSchema-instance")))
+
+  (xmp-define-namespace-map
+   :schema2000
+   t  
+   (list
+    nil
+    (list :net.xmp.schema
+	  "xsd"
+	  "http://www.w3.org/2001/XMLSchema")
+    (list :net.xmp.schema
+	  "xsd"
+	  "http://www.w3.org/2001/XMLSchema/")
+    (list :net.xmp.schema-instance
+	  "xsi"
+	  "http://www.w3.org/2001/XMLSchema-instance")))
+
+  (xmp-define-namespace-map
+   :schema t  
+   (list nil :schema2000 :schema1999))
+
+  (xmp-define-namespace-map
+   :schema1 t  
+   (list nil :schema1999 :schema2000))
+
+  (xmp-define-namespace-map
+   :soap1.2 t  
+   (list
+    nil
+    (list :net.xmp.soap.envelope
+	  "SOAP-ENV"
+	  "http://schemas.xmlsoap.org/soap/envelope/")
+    (list :net.xmp.soap.encoding
+	  "SOAP-ENC"
+	  "http://schemas.xmlsoap.org/soap/encoding/")
+    ))
+
+  (xmp-define-namespace-map
+   :soap1.1 t  
+   (list
+    nil
+    (list :net.xmp.soap.envelope
+	  "SOAP-ENV"
+	  "http://schemas.xmlsoap.org/soap/envelope/")
+    (list :net.xmp.soap.encoding
+	  "SOAP-ENC"
+	  "http://schemas.xmlsoap.org/soap/encoding/")
+    ))
+
+  (xmp-define-namespace-map :soap  t (list nil :soap1.2 :soap1.1 :schema))
+  (xmp-define-namespace-map :soap1 t (list nil :soap1.1 :soap1.2 :schema))
+
+  (define-xmp-element nil 'env:|Envelope| '(:complex
+					    (:seq (:seq* env:|Header|)
+						  env:|Body|
+						  (:seq* (:any)))))
+  (define-xmp-element nil 'env:|Header|   (xmp-any-type nil))
+  (define-xmp-element nil 'env:|Body|     (xmp-any-type nil))
+  (define-xmp-element nil 'env:|Fault|    '(:complex
+					    (:set
+					     (:element "faultcode"   enc:|QName|)
+					     (:element "faultstring" enc:|string|)
+					     (:element "faultactor" enc:|string|)
+					     (:element "detail"
+						       (:complex (:seq* (:any))))
+					     (:seq* (:any))
+					     )))
+  (define-xmp-element nil "multiRef"    '(:complex (:seq* (:any))))
+  (define-xmp-type    nil 'enc:|Array|  '(:complex (:seq* (:any))))
+
+  (define-soap-type nil 'xsd:|ur-type| (xmp-any-type nil))
+  (define-soap-type nil 'xsd:|anyType| (xmp-any-type nil))
+  (macrolet ((types () (list 'quote (reverse *soap-deftypes*))))
+    (dolist (d (types)) (eval d)))
+  
+  )
+(define-soap-names)

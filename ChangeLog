@@ -1,4 +1,22 @@
+2005-11-22    <mm@PROA>
 
+	* xmp-wsdl.cl (define-wsdl-names): new fn collects all WSDL definitions
+	           (soap-new-environment): reset all global vars and defs
+	* xmp-soap.cl (define-soap-names): new fn collects all SOAP definitions
+	* xmp-schema.cl (define-schema-elements): new fn collects all Schema
+	                         element definitions into a single call
+	* xmp-base.cl (xmp-new-environment): reset all global vars
+	* xmp-wsdl.cl (decode-wsdl-source): add class argument
+	     (wsdl-generate-code): NEW EXPORTED gf used in code gen by make-interface
+	                           [rfe6371]
+	     (wsdl-make-interface): use wsdl-generate-code for soap-message-server call
+	                            use wsdl-generate-code for soap-message-client call
+				    use wsdl-generate-code for top-level calls
+	     (wsdl-bind-operation): use wsdl-generate-code for top-level calls
+	     (wsdl-emit-object-classes): use wsdl-generate-code for top-level calls
+	     (wsdl-emit-wrapper): use wsdl-generate-code for top-level calls
+
+	
 2005-11-21    <mm@PROA>
 
 	* build.cl (filenames): stop using Gray stream in fasl copy
@@ -393,4 +411,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.10 $
+$Revision: 2.11 $
