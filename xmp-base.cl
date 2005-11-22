@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.6 2005/10/03 20:20:22 layer Exp $
+;; $Id: xmp-base.cl,v 2.7 2005/11/22 00:48:04 mm Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -217,6 +217,8 @@
    xmp-slot-value
    xmp-run-one-file
    xmp-decode-file
+   xmp-decode-string
+   xmp-decode-stream
    xmp-signature-equal
    xmp-in-depth
    xmp-out-depth
@@ -286,7 +288,7 @@
 (defpackage :net.xmp.xml (:use))
 
 
-(defvar *xmp-debug* t)
+(defvar *xmp-debug* nil)
 
 
 ;;; composite class names:  xml-protocol-transport-role-sendstyle-receivestyle-connector
@@ -458,6 +460,10 @@
 		      ;;  :strict    -> must be declared in element def
 		      ;;  :accept    -> do not look for declaration
 		      :initarg :nillable :initform :accept)
+    (xml-syntax       :accessor xmp-xml-syntax
+		      ;;   nil   -> :seq? is :set*, :maybe spliced in
+		      ;; :strict -> :seq? is :seq, :maybe ignored
+		      :initarg :xml-syntax :initform nil)
 
    ;;; INSTANCE SLOTS NOT-copied by xmp-copy
 
@@ -736,7 +742,12 @@
 		  ))))
   (loop
    (let (data elt attr type vals simple)
-     (when (null data-list) (return))
+     (when (null data-list)
+       (when (and cdi (eq :incomplete (xmp-cdi-state cdi)))
+	 (xmp-error conn :client 
+		    :string (list "Expected: ~S  Found only: ~S" 
+				  (xmp-cdi-def cdi) (xmp-cdi-found cdi))))
+       (return))
      ;; data is a single element
      (setf data (pop data-list))
      (multiple-value-setq (elt attr) (xmp-element-parts conn data))
@@ -759,9 +770,8 @@
 		(and (or (equalp "true" (second nillable))
 			 (equal "1" (second nillable)))
 		     (null data))))))
-      ((or cdi (xmp-any-cpart conn exel))
-       (cond ((and elt 
-		   (if cdi (xmp-test-complex-def conn cdi elt) t))
+      ((and elt (or cdi (xmp-any-cpart conn exel)))
+       (cond ((if cdi (xmp-test-complex-def conn cdi elt) t)
 
 		;; Update the context first, then get the expected elements
 		(push (cons elt attr) (xmp-inside-elements conn))
@@ -782,21 +792,22 @@
 
 		(when vals (setf content-list (nconc content-list vals))
 		      (when type (push type type-list))))
-	     ((and elt cdi)  ;;; [bug15502] refine the error message
+	     (cdi  ;;; [bug15502] refine the error message
 	      (xmp-error conn :client 
-			 :string (list "Expected: ~S  Found element: ~S" 
-				       (xmp-cdi-def cdi) elt)))
+			 :string (list "Expected: ~S  Found: ~S" 
+				       (xmp-cdi-def cdi)
+				       (append (xmp-cdi-found cdi) (list elt)))))
 	     ((and (stringp data) trim 
-		   (cond ((equal "" (string-trim trim data))
-			  (setf data nil)
-			  t)
-			 (elt nil)
-			 (t t)))
-	      (when data (collect-simple strt data)))
+		   (when (equal "" (string-trim trim data))
+		     (setf data nil)
+		     t))
+	      (when data (collect-simple (setf simple strt) data)))
 	     (t (xmp-error
 		 conn :client 
 		 :string (list "Non-blank string data in complex context ~S" data)))
 	     ))
+      ((and (or cdi (xmp-any-cpart conn exel))
+	    (stringp data) trim (equal "" (string-trim trim data))))
       ((and (stringp data)
 	    (when exel (if (atom exel)
 			   (setf simple exel)
@@ -2445,8 +2456,11 @@
 (defmethod xmp-decode-file ((conn xmp-connector) file)
   (xmp-decode-message conn (xmp-parse-file conn file)))
 
-(defmethod xmp-decode-string ((conn xmp-connector) file)
-  (xmp-decode-message conn (xmp-parse-message conn file)))
+(defmethod xmp-decode-string ((conn xmp-connector) string)
+  (xmp-decode-message conn (xmp-parse-message conn string)))
+
+(defmethod xmp-decode-stream ((conn xmp-connector) stream)
+  (xmp-decode-message conn (xmp-parse-message conn stream)))
 
 
 
@@ -2455,7 +2469,7 @@
 
 (defclass xmp-complex-def-instance ()
   ((complex-def :accessor xmp-cdi-def :initarg :def)
-   (state       :accessor xmp-cdi-state :initform nil)
+   (state       :accessor xmp-cdi-state :initarg :state :initform nil)
    (found       :accessor xmp-cdi-found :initform nil)
    (stack       :accessor xmp-cdi-stack :initform nil)
    (inner-def
@@ -2467,12 +2481,17 @@
 (defmethod xmp-new-complex-def ((conn t) cd)
   (cond ((atom cd) cd)
 	((xmp-any-cpart conn cd) cd)
-	(t (make-instance 'xmp-complex-def-instance :def cd))))
+	(t (make-instance 'xmp-complex-def-instance
+			  :def cd
+			  :state (case (first cd)
+				   ((:seq1 :seq+ :set1 :set+)
+				    (when (cdr cd) :incomplete)))
+			  ))))
 
 (defmethod xmp-test-complex-def ((conn t) (cdi xmp-complex-def-instance) elt)
   (xmp-match-complex-part conn cdi
 			  (xmp-cdi-def cdi)
-			  (append (xmp-cdi-found cdi) (list elt))))
+			  (append (xmp-cdi-found cdi) (when elt (list elt)))))
 
 (defmethod xmp-step-complex-def ((conn t) (cdi xmp-complex-def-instance) elt)
   (setf (xmp-cdi-found cdi)
@@ -2482,11 +2501,43 @@
   (case (xmp-match-element-def conn cdi part (first found))
     (:match t)
     (:complex 
-     (xmp-match-complex-tail conn cdi (first part) (cdr part) found))
+     (xmp-match-complex-tail
+      conn cdi (xmp-top-collector conn part) (xmp-top-parts conn  part) found))
     (otherwise nil)))
 
+(defmethod xmp-top-collector ((conn t) part) (first part))
+(defmethod xmp-top-collector ((conn xmp-connector) part)
+  (if (consp part)
+      (case (first part)
+	(:seq?
+	 (case (xmp-xml-syntax conn)
+	   (:strict :seq)
+	   (otherwise :set*)))
+	(otherwise (first part))
+	)
+    part))
 
-;;(pushnew :xmp-debug *features*)
+(defmethod xmp-top-parts     ((conn t) part) (cdr part))
+(defmethod xmp-top-parts ((conn xmp-connector) part)
+  (if (consp part)
+      (case (first part)
+	(:seq?
+	 (let ((maybe (dolist (p (cdr part) nil)
+			(and (consp p) (eq :maybe (first p)) (return p))))
+	       (strict (eq :strict (xmp-xml-syntax conn)))
+	       )
+	   (if maybe
+	       (mapcan #'(lambda (p)
+			   (if (and (consp p) (eq :maybe (first p)))
+			       (if strict nil (append (cdr p) nil))
+			     (list p)))
+		       (cdr part))
+	     (cdr part))))
+	(otherwise (cdr part))
+	)
+    part))
+
+;;(eval-when (compile load eval) (pushnew :xmp-debug *features*))
 ;;;
 
 (defmethod xmp-match-complex-tail ((conn t) cdi coll tail found)
@@ -2498,41 +2549,50 @@
 	 (top-tail (if top
 		       (second top)
 		     tail))
-	 (fhead (if top (third top) 0))
+	 (flength (length found))
+	 (fplace (or (when top (third top)) 0))
 	 (matched (if top (fourth top) nil))
 	 (index (fifth top))
-	 (ftail found)
 	 (res :new)
-	 new-coll new-tail)
+	 new-coll new-tail set-state save-place)
 
-    (dotimes (i fhead) (setf ftail (cdr ftail)))
-    
     (flet ((match-part (part)
-		       (case (xmp-match-element-def conn cdi part (first ftail))
+		       (case (xmp-match-element-def conn cdi part (nth fplace found))
 			 (:match (values :match nil nil))
 			 (:complex 
 			  (values :push (first part) (cdr part)))
 			 (otherwise nil)))
 	   (push-state ()
-		       (push (list top-coll top-tail fhead matched index) stack))
+		       (push (list top-coll top-tail save-place matched index set-state)
+			     stack))
 	   (pop-state ()
-		      (multiple-value-setq (top-coll top-tail fhead matched index)
-			(values-list (pop stack))))
+		      (multiple-value-setq
+			  (top-coll top-tail save-place matched index set-state)
+			(values-list (pop stack)))
+		      (when save-place (setf fplace save-place))
+		      (setf save-place nil))
 	   )
 
       #+xmp-debug
-      (format t
-	      "~&; ~S top-coll=~S -tail=~S fhead=~S mat=~S found=~S~%"
-	      res top-coll top-tail fhead matched found)
+      (when (xmp-debug conn)
+	(format t
+		"~&;BEGIN coll=~S tail=~S ~%;      fplace=~S found=~S~%"
+		coll tail fplace found))
 	
       (setf
        res
        (loop
-
+	
+	#+xmp-debug
+	(when (xmp-debug conn)
+	  (format t "~&;TOP ~S top-coll=~S top-tail=~S ~%" res top-coll top-tail)
+	  (format t ";      fplace=~S matched=~S index=~S~%"
+		  fplace matched index))
+	(setf save-place nil)
 	(ecase top-coll
 
 	  ((:seq :seq*)
-	   (cond ((null ftail)
+	   (cond ((eql fplace flength)
 		  ;; If all the elements are used up, 
 		  ;;    this pattern remains on the stack.
 		  (setf res :done))
@@ -2550,17 +2610,8 @@
 			(:seq  (setf top-tail (cdr tl))))
 		      (return))))))
 
-	  ((:set :set*)
-	   (when (null matched)
-	     ;; this is the first time we enter the complex-part
-	     ;;  save the full content
-	     (setf matched top-tail))
-	   (case res
-	     ((:pop :pop+)
-	      ;; if a complex-sub-part succeeded, then restore the full pattern again
-	      (case top-coll (:set* (setf top-tail matched)))))
-	     
-	   (if (null ftail)
+	  (:set	     
+	   (if (eql fplace flength)
 	       (setf res :done)
 	     (do ((tl top-tail (cdr tl)) part)
 		 ((atom tl) (setf res :pop))
@@ -2568,28 +2619,63 @@
 	       (multiple-value-setq (res new-coll new-tail)
 		 (match-part part))
 	       (when res
-		 (case top-coll
-		   (:set* (case res (:push (setf top-tail (cdr tl)))))
-		   (:set (setf top-tail (remove part top-tail :count 1))))
+		 (setf top-tail (remove part top-tail :count 1))
+		 (return)))))
+	  (:set*
+	   (if (eql fplace flength)
+	       (setf res :done)
+	     (do ((tl (case res
+			((:pop nil) (if (eql index fplace)
+					;; complex part failed
+					;; try the next match
+					matched
+				      ;; otherwise look at whole set again
+				      top-tail))
+			(otherwise top-tail))
+		      (cdr tl))
+		  part)
+		 ((atom tl) (setf res :pop))
+	       (setf part (car tl))
+	       (multiple-value-setq (res new-coll new-tail)
+		 (match-part part))
+	       (when res
+		 (case res (:push
+			    ;; remember where we stopped at this level
+			    (setf index fplace matched (cdr tl))))
 		 (return)))))
 
 	  (:seq1
+	   ;; index is count of items already matched
+	   (or index (setf index 0))
+	   (case res (:pop (incf index)))
 	   (cond ((null res) 
 		  ;; If last complex-part failed, propagate the failure.
 		  nil)
-		 ((null ftail) (setf res :done))
+		 ((eql fplace flength)
+		  (if (or (null index) (< index (length (cdr (xmp-cdi-def cdi)))))
+		      (setf set-state :incomplete)
+		    (setf set-state nil))
+		  (setf res :done))
 		 ((null top-tail) (setf res :pop))
 		 (t (multiple-value-setq (res new-coll new-tail)
 		      (match-part (first top-tail)))
-		    (when res (setf top-tail (cdr top-tail))))))
+		    (when res
+		      (case res (:match (incf index)))
+		      (setf top-tail (cdr top-tail))))))
 	  (:seq+
+	   ;; index is count of items already matched
+	   (when res (if index (incf index) (setf index 0)))
 	   (cond ((null res) (when matched
 			       (setf top-tail (cdr top-tail)
 				     matched nil
 				     res :step)))
-		 ((or (eq res :pop) (eq res :pop+))
+		 ((eq res :pop)
 		  (setf matched t res :step))
-		 ((null ftail) (setf res :done))
+		 ((eql fplace flength)
+		  (if (or (null index) (< index (length (cdr (xmp-cdi-def cdi)))))
+		    (setf set-state :incomplete)
+		    (setf set-state nil))
+		  (setf res :done))
 		 ((null top-tail) (setf res :pop))
 		 (t (multiple-value-setq (res new-coll new-tail)
 		      (match-part (first top-tail)))
@@ -2601,16 +2687,23 @@
 				     res :step)))))))
 
 	  ((:set1 :set+)
+	   (when (null matched)
+	     (setf matched (mapcar #'(lambda (x) (declare (ignore x)) nil) top-tail)))
 	   (cond ((null res))
-		 ((or (eq res :pop) (eq res :pop+))
-		  (pushnew index matched) (setf res :step))
-		 ((null ftail) (setf res :done))
+		 ((eq res :pop)
+		  (setf (nth index matched) index)
+		  (setf res :step))
+		 ((eql fplace flength)
+		  (if (member nil matched)
+		      (setf set-state :incomplete)
+		    (setf set-state nil))
+		  (setf res :done))
 		 ((null top-tail) (setf res :pop))
 		 (t (let ((i 0))
 		      (dolist (part top-tail
-				    (if (eql (length top-tail) (length matched))
-					(setf res :pop)
-				      (setf res nil)))
+				    (if (member nil matched)
+					(setf res nil)
+				      (setf res :pop)))
 			(when (case top-coll
 				(:set1 (not (member i matched)))
 				(:set+ t))
@@ -2618,36 +2711,41 @@
 			    (match-part part))
 			  (case res
 			    (:push  (setf index i))
-			    (:match (pushnew i matched)))
+			    (:match (setf (nth i matched) i)))
 			  (when res (return)))
 			(incf i))))))
 
 	  (:or
 	   (cond ((null res) (pop top-tail) (setf res :step))
-		 ((or (eq res :pop) (eq res :pop+))
-		  ;; Once a clause is satisfied, pop the :or
+		 ((eq res :pop)
+		  ;; Once a clause is satisfied, resume the next
 		  ;;  pattern off the stack.
-		  (setf top-tail (list (first top-tail))))
-		 ((null ftail) (setf res :done))
+		  (setf top-tail nil))
+		 ((eql fplace flength)
+		  (setf set-state :incomplete)
+		  (setf res :done))
 		 ((null top-tail) (setf res nil))
 		 (t (multiple-value-setq (res new-coll new-tail)
 		      (match-part (first top-tail)))
-		    (case res
+		    (ecase res
 		      ((nil) (pop top-tail) (setf res :step))
 		      (:match (setf top-tail (list (first top-tail)))
-			      (incf fhead) (pop ftail)
-			      ;; we need to increment fhead in the outer context too
-			      (setf res :pop+)
-			      )))
+			      (incf fplace)
+			      (setf res :pop)
+			      )
+		      (:push (setf save-place fplace))
+		      ))
 		 ))
 		  
 	  )
 
 	#+xmp-debug
-	(format
-	 t
-	 "~&; ~S top-coll=~S -tail=~S fhead=~S mat=~S~%     new-coll=~S new-tail=~S~%"
-	 res top-coll top-tail fhead matched new-coll new-tail)
+	(when (xmp-debug conn)
+	  (format
+	   t 
+	   "~&;BOT ~S top-coll=~S top-tail=~S ~%;     fplace=~S matched=~S~%"
+	   res top-coll top-tail fplace matched)
+	  (format t ";     new-coll=~S new-tail=~S~%" new-coll new-tail))
 
 	(ecase res
 	  (:push   (push-state)
@@ -2655,30 +2753,34 @@
 			 top-tail new-tail
 			 matched nil
 			 ))
-	  (:match (incf fhead) (pop ftail))
+	  (:match (incf fplace))
 	  (:step  nil)
 	  (:done
 	   ;; We have run out of elements to match, so save the state
 	   ;;  of the matching up to now, and return success.
+	   (setf save-place fplace)
 	   (push-state)
 	   (return t))
-	  ((:pop :pop+)
-	   (cond (stack (pop-state) (case res (:pop+ (incf fhead))) )
-		 (ftail
+	  (:pop
+	   (cond (stack (pop-state))
+		 ((< fplace flength)
 		  ;; We have run out of pattern, but there are elements
 		  ;;  left to match;  this is failure.
 		  (return nil))
-		 (t (push-state)
+		 (t (setf save-place fplace)
+		    (push-state)
 		    (return t))))
 	  ((nil)
 	   (cond (stack (pop-state))
 		 (t (return nil))))
 	  )
 	))
-      (setf (xmp-cdi-stack cdi) stack)
+      (setf (xmp-cdi-stack cdi) stack
+	    (xmp-cdi-state cdi) set-state)
 
       #+xmp-debug
-      (format t "~&; ~S stack-top=~S ~%" res (first stack))
+      (when (xmp-debug conn)
+	(format t "~&;EXIT ~S state=~S stack-top=~S ~%" res set-state (first stack)))
  
       res)))
 
@@ -2732,11 +2834,24 @@
 			 (when (match target pat ignore-case)
 			   (return t))))))))))
 	       
-(defmethod xmp-match-element-def ((conn t) cdi eldef elt)
+(defmethod xmp-match-element-def ((conn t) cdi eldef elt &aux type)
   (setf (xmp-cdi-inner cdi) nil)
   (cond ((null eldef) nil)
 	((or (symbolp eldef) (stringp eldef))
-	 (when (xmp-match-name conn elt eldef) :match))
+	 (cond ((xmp-match-name conn elt eldef) :match)
+	       ((null (setf type (xmp-find-element conn eldef :in))) nil)
+	       ((and (consp type) (eq :complex (first type))
+		     (consp (setf type (second type)))
+		     (eq :or (pop type))
+		     (or (atom (first type))
+			 (eq :element (first (first type)))))
+		(dolist (sub type)
+		  (if (atom sub)
+		      (when (xmp-match-name conn elt sub)
+			(return (values :match sub)))
+		    (and (eq :element (first sub))
+			 (xmp-match-name conn elt (second sub))
+			 (return (values :match sub))))))))
 	(t (case (first eldef)
 	     (:any (when elt :match))
 	     (:element (when (xmp-match-name conn elt (second eldef))
@@ -2781,7 +2896,8 @@
 
 
 (defun xmp-lookup (table dname dstring name4 
-			 &key attribute (attributes nil a-p) (value nil v-p) default
+			 &key attribute (attributes nil a-p) (value nil v-p)
+			 delete default
 			 &aux found (not-found t) key edef idef item plist
 			 (not '#:not) any ht)
   ;; attributes -> :query            ; return list  (name value ... )
@@ -2795,9 +2911,9 @@
   ;;       NOT in export tables.
 
   (if name4
-      (if v-p
-	  (setf (gethash name4 (elt table 3)) value)
-	(gethash name4 (elt table 3)))
+      (cond (delete (remhash name4 (elt table 3)))
+	    (v-p (setf (gethash name4 (elt table 3)) value))
+	    (t (gethash name4 (elt table 3))))
     (let ()
       (or (when (and dname (symbolp dname))
 	    (setf item (gethash (setf key dname) (setf ht (elt table 0)) not))
@@ -2822,7 +2938,7 @@
       (setf idef item)
       (and found (consp item) (eq :element (first item))
 	   (setf idef (third item) edef item plist (cdddr item)))
-      (cond ((and (null v-p) (null a-p))
+      (cond ((and (null v-p) (null a-p) (null delete))
 	     (cond ((null attribute) nil)
 		   ((or (atom attribute)
 			(and (consp attribute) (eq :any-case (first attribute))))
@@ -2834,9 +2950,9 @@
 		    (cond ((eq idef not)
 			   (setf v-p t
 				 value (list :element
-					   (list key)
-					   nil
-					   (first attribute) (second attribute))))
+					     (list key)
+					     nil
+					     (first attribute) (second attribute))))
 			  (edef (if (setf edef
 					  (xmp-mem2 nil plist (first attribute)))
 				    (setf (second edef) (second attribute)
@@ -2848,14 +2964,15 @@
 					v-p t value item)))
 			  (t (setf v-p t
 				   value (list :element (list key) item
-					     (first attribute) (second attribute))))))
+					       (first attribute) (second attribute))))))
 		   (t (error "Ill-formed attribute ~S" attribute))))
-	    ((and (null v-p) (eq attributes :query))
+	    ((and (null v-p) (null delete) (eq attributes :query))
 	     (setf idef (when edef plist)))
-	    ((and (null v-p) a-p (null attributes))
+	    ((and (null v-p) (null delete) a-p (null attributes))
 	     (if edef
 		 (setf (cdddr edef) nil plist nil idef nil)
 	       (setf idef nil)))
+	    (delete)		      
 	    (v-p (when not-found
 		   (cond ((and dname (symbolp dname))
 			  (setf ht (elt table 0) key dname))
@@ -2867,16 +2984,16 @@
 		     (error "Ambiguous call to xmp-lookup (a)."))
 		   (setf value (list* :element (list key) value attributes))))
 	    (t (error "Ambiguous call to xmp-lookup (b).")))
-      (if v-p
-	  (and key ht (values (setf (gethash key ht) value) ht))
-	
-	;; values:   item symbol nil   -> found in EQ table
-	;;           item string nil   -> found in EQUAL table
-	;;           item string :any  -> found in STRING-EQUAL table
-	(values (if (eq idef not)
-		    nil
-		  idef)
-		found any plist)))))
+      (cond (delete (and key ht (values (when (remhash key ht) t))))
+	    (v-p (and key ht (values (setf (gethash key ht) value) ht)))
+	    (t 
+	     ;; values:   item symbol nil   -> found in EQ table
+	     ;;           item string nil   -> found in EQUAL table
+	     ;;           item string :any  -> found in STRING-EQUAL table
+	     (values (if (eq idef not)
+			 nil
+		       idef)
+		     found any plist))))))
 
 
 
@@ -2937,11 +3054,11 @@
 			      conn :type-spec (cddr type-spec) nss options)))))))
 
 (defmethod xmp-normal-complex-def ((conn t) complex-def nss &rest options
-				   &key &allow-other-keys)
+				   &key inner-p &allow-other-keys)
   (etypecase complex-def
     (cons
      (cond
-      ((xmp-collection-p conn complex-def)
+      ((setf inner-p (xmp-collection-p conn complex-def :inner-p inner-p))
        (xmp-list*
 	complex-def
 	(first complex-def)
@@ -2956,7 +3073,9 @@
 			(apply 'xmp-normal-element-spec conn part nss options))
 		       (otherwise
 			(apply 'xmp-normal-complex-def
-			       conn part nss options))))))
+			       conn part nss
+			       :inner-p inner-p
+			       options))))))
 	 (cdr complex-def))))
       (t (error "Ill-formed complex-def ~S" complex-def))
       ))))
@@ -3027,6 +3146,8 @@
 				(otherwise (first (second edef)))))))))))
 
 (defmethod xmp-elt-getf-name ((conn t) plist edef &optional ignore-case &aux pattern)
+  ;; Look in property list plist for a name that matches some
+  ;;  name in edef.
   (typecase edef
     (atom (setf pattern edef))
     (otherwise
@@ -3059,7 +3180,10 @@
        (xmp-error conn :def
 		  (list "redefining ~A type ~S" (xmp-warning-leader conn) dname)))))
   (xmp-lookup *defined-xmp-elements* nil nil dname
-	      :value (apply 'xmp-normal-type-spec conn type-spec nss options)))
+	      :value
+	      (when type-spec 
+		(apply 'xmp-normal-type-spec conn type-spec nss options))
+	      :delete (null type-spec)))
 
 (defmethod define-xmp-element ((conn t) names type-spec &rest options
 			       &key (redef :warn) (nss :dns) nillable
@@ -3071,11 +3195,12 @@
     (let* ((dname names)
 	   (table *defined-xmp-elements*)
 	   odef oname oany
-	   (tdef (apply 'xmp-normal-type-spec conn type-spec nss options))
+	   (tdef (when type-spec 
+		   (apply 'xmp-normal-type-spec conn type-spec nss options)))
 	   )
       (multiple-value-setq (odef oname oany) (xmp-lookup table dname dname nil))
 
-      (when (and odef (not (equal odef tdef)))
+      (when (and odef tdef (not (equal odef tdef)))
 	(case redef
 	  (:warn (xmp-class-warning
 		  conn 'xmp-redefinition
@@ -3094,6 +3219,7 @@
 		    dname)
 		  nil
 		  :attributes (when nillable (list :nillable t))
+		  :delete (null type-spec)
 		  :value tdef))))
 
 (defmethod xmp-getf-in-part ((conn t) part name &optional default)
@@ -3249,12 +3375,15 @@
     (values nse other ambi missing)))
 
 
-(defmethod xmp-collector-p ((conn t) item)
+(defmethod xmp-collector-p ((conn t) item &key inner-p)
   (case item
-    ((:seq :seq* :seq1 :seq+ :set :set* :set1 :set+ :or) t)))
+    ((:seq :seq* :seq1 :seq+ :set :set* :set1 :set+ :or) t)
+    (:seq? :seq?)
+    (:maybe (case inner-p (:seq? t)))
+    ))
 
-(defmethod xmp-collection-p ((conn t) item)
-  (and (consp item) (xmp-collector-p conn (first item))))
+(defmethod xmp-collection-p ((conn t) item &key inner-p)
+  (and (consp item) (xmp-collector-p conn (first item) :inner-p inner-p)))
 
 (defmethod xmp-collection-type-p ((conn t) item)
   (and (consp item)

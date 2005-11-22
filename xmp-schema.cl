@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-schema.cl,v 2.5 2005/09/06 17:10:28 layer Exp $
+;; $Id: xmp-schema.cl,v 2.6 2005/11/22 00:48:04 mm Exp $
 
 ;; XML Schema support
 
@@ -75,6 +75,7 @@
      "choice"
      "any"
      "annotation"
+     "notation"
      "anyAttribute"
      "simpleContent"
      "complexContent"
@@ -89,6 +90,14 @@
      "include"
      "minInclusive"
      "maxInclusive"
+     "minExclusive"
+     "maxExclusive"
+     "redefine"
+     "whiteSpace"
+     "unique"
+     "union"
+     "key"
+     "keyref"
 
      ;; simpleType names (incomplete)
 
@@ -139,11 +148,18 @@
      "unsignedShort"
      "unsignedByte" 
      "positiveInteger"
-
+     
+     "appinfo"
      "enumeration"
+     "length"
+     "field"
+     "selector"
+     "minLength"
      "maxLength"
      "maxlength"
      "nillable"
+     "totalDigits"
+     "fractionDigits"
      ))
 
   (defpackage :net.xmp.schema-instance
@@ -320,8 +336,6 @@
 
 
 
-
-
 (defmethod schema-parts-to-type ((comp schema-component) 
 				 &key options (error-p t) conn
 				 &aux part ext sub key base b-def b-type extype)
@@ -440,10 +454,14 @@
 
 
 
-(defun decode-schema (file &key (verbose t))
-  (let* ((conn (make-instance 'schema-file-connector :source file)))
-
-    (xmp-decode-file conn file)
+(defun decode-schema (&key file string stream url (verbose t) syntax)
+  (let* ((conn (make-instance 'schema-file-connector
+			      :xml-syntax syntax :source file)))
+    (when url (setf string (net.aserve.client:do-http-request url)))
+    (cond (string (xmp-decode-string conn string))
+	  (stream (xmp-decode-stream conn string))
+	  (file   (xmp-decode-file conn file))
+	  (verbose (format t "~&~%NO SOURCE SPECIFIED.~%")))
     (when verbose
       (format t "~&~%Elements:~%~S~%" (schema-elements conn))
       (format t "~%Types:~%~S~%" (schema-types conn))
@@ -523,64 +541,403 @@
   data)
 
 
+;;; FROM http://www.w3.org/TR/2004/REC-xmlschema-1-20041028/structures.html
+
+;; <schema
+;;   attributeFormDefault = (qualified | unqualified) : unqualified
+;;   blockDefault = (#all | List of (extension | restriction | substitution))  : ''
+;;   elementFormDefault = (qualified | unqualified) : unqualified
+;;   finalDefault = (#all | List of (extension | restriction | list | union))  : ''
+;;   id = ID
+;;   targetNamespace = anyURI
+;;   version = token
+;;   xml:lang = language
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: ((include | import | redefine | annotation)*,
+;;             (((simpleType | complexType | group | attributeGroup)
+;;               | element | attribute | notation), annotation*)*)
+;; </schema>
 (define-xmp-element nil 'xs:|schema| '(:complex
-				       (:set* xs:|element| xs:|complexType| 
-					      xs:|attribute| xs:|simpleType| 
-					      xs:|attributeGroup| xs:|group|
-					      xs:|import| xs:|include|
-					      )))
-(define-xmp-element nil 'xs:|group|       '(:complex (:set* xs:|sequence|)))
+				       (:seq? 
+					(:set* xs:|include| xs:|import| 
+					       xs:|redefine| xs:|annotation|)
+					(:set* (:seq
+						(:or xs:|simpleType| xs:|complexType| 
+						     xs:|group| xs:|attributeGroup|)
+						xs:|element| 
+						xs:|attribute| xs:|notation| )
+					       xs:|annotation|))))
+
+;; <element
+;;   abstract = boolean : false
+;;   block = (#all | List of (extension | restriction | substitution))
+;;   default = string
+;;   final = (#all | List of (extension | restriction))
+;;   fixed = string
+;;   form = (qualified | unqualified)
+;;   id = ID
+;;   maxOccurs = (nonNegativeInteger | unbounded)  : 1
+;;   minOccurs = nonNegativeInteger : 1
+;;   name = NCName
+;;   nillable = boolean : false
+;;   ref = QName
+;;   substitutionGroup = QName
+;;   type = QName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, ((simpleType | complexType)?, (unique | key | keyref)*))
+;; </element>
+(define-xmp-element nil 'xs:|element| '(:complex
+					(:seq? xs:|annotation|
+					      (:seq
+					       (:or xs:|simpleType| xs:|complexType|)
+					       (:set*
+						xs:|unique|
+						xs:|key|   
+						xs:|keyref|)))))
+
+;; <group
+;;   id = ID
+;;   maxOccurs = (nonNegativeInteger | unbounded)  : 1
+;;   minOccurs = nonNegativeInteger : 1
+;;   name = NCName
+;;   ref = QName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (all | choice | sequence)?)
+;; </group>
+(define-xmp-element nil 'xs:|group|  '(:complex (:seq? xs:|annotation|
+						      (:or xs:|all| xs:|choice|
+							   xs:|sequence|))))
+
+;; <complexType
+;;   abstract = boolean : false
+;;   block = (#all | List of (extension | restriction))
+;;   final = (#all | List of (extension | restriction))
+;;   id = ID
+;;   mixed = boolean : false
+;;   name = NCName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (simpleContent | complexContent
+;;                            | ((group | all | choice | sequence)?,
+;;                               ((attribute | attributeGroup)*, anyAttribute?)
+;;                            )))
+;; </complexType>
 (define-xmp-element nil 'xs:|complexType|
   '(:complex
-    (:set* xs:|sequence| xs:|any| xs:|annotation|
-	   xs:|attribute| xs:|anyAttribute| xs:|attributeGroup| 
-	   xs:|group| xs:|all| xs:|choice| xs:|element|
-	   xs:|simpleContent|
-	   xs:|complexContent|
-	   (:any)          ;;;wsdl:element  occurs in Agni Find MP3 on xmethods
-	   )))
-(define-xmp-element nil 'xs:|attribute|      '(:complex
-					       (:set* xs:|simpleType| xs:|annotation|)))
+    (:seq? xs:|annotation|
+	  (:or xs:|simpleContent| xs:|complexContent|
+	       (:seq (:or xs:|group| xs:|all| xs:|choice| xs:|sequence|)
+		     (:set* xs:|attribute| xs:|attributeGroup|)
+		     xs:|anyAttribute|))
+
+	  (:maybe 
+	   xs:|any|
+	   xs:|element|
+	   (:any) ;;;wsdl:element  occurs in Agni Find MP3 on xmethods
+	   ))))
+
+;; <redefine
+;;   id = ID
+;;   schemaLocation = anyURI
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation | (simpleType | complexType | group | attributeGroup))*
+;; </redefine>
+(define-xmp-element nil 'xs:|redefine| '(:complex (:seq? xs:|annotation|
+							 (:or 
+							  xs:|simpleType| 
+							  xs:|complexType| 
+							  xs:|group|
+							  xs:|attributeGroup| 
+							  ))))
+
+;; <attribute
+;;   default = string
+;;   fixed = string
+;;   form = (qualified | unqualified)
+;;   id = ID
+;;   name = NCName
+;;   ref = QName
+;;   type = QName
+;;   use = (optional | prohibited | required) : optional
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, simpleType?)
+;; </attribute>
+(define-xmp-element nil 'xs:|attribute|  '(:complex
+					   (:seq? xs:|simpleType| xs:|annotation|)))
+
+;; <attributeGroup
+;;   id = ID
+;;   name = NCName
+;;   ref = QName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, ((attribute | attributeGroup)*, anyAttribute?))
+;; </attributeGroup>
 (define-xmp-element nil 'xs:|attributeGroup| '(:complex
-					       (:set* xs:|attribute| xs:|anyAttribute| 
-						      xs:|annotation|)))
-(define-xmp-element nil 'xs:|annotation|     (xmp-any-type nil))
+					       (:seq? xs:|annotation|
+						     (:set*
+						      xs:|attribute|
+						      xs:|attributeGroup|)
+						     xs:|anyAttribute| 
+						     )))
 
+;; <annotation
+;;   id = ID
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (appinfo | documentation)*
+;; </annotation>
+(define-xmp-element nil 'xs:|annotation|
+  `(:complex (:seq? (:set* xs:|appinfo| xs:|documentation|)
+		    (:maybe ,(xmp-any-cpart nil)))))
 
+;; <appinfo
+;;   source = anyURI
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: ({any})*
+;; </appinfo>
+(define-xmp-element nil 'xs:|appinfo|        (xmp-any-type nil))
+
+;; <documentation
+;;   source = anyURI
+;;   xml:lang = language
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: ({any})*
+;; </documentation>
+(define-xmp-element nil 'xs:|documentation|  (xmp-any-type nil))
+
+;; <all
+;;   id = ID
+;;   maxOccurs = 1 : 1
+;;   minOccurs = (0 | 1) : 1
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, element*)
+;; </all>
 (define-xmp-element nil 'xs:|all|           
-  '(:complex (:seq xs:|annotation| (:seq* xs:|element|))))
+  '(:complex (:seq? xs:|annotation| (:seq* xs:|element|))))
+
+;; <sequence
+;;   id = ID
+;;   maxOccurs = (nonNegativeInteger | unbounded)  : 1
+;;   minOccurs = nonNegativeInteger : 1
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (element | group | choice | sequence | any)*)
+;; </sequence>
 (define-xmp-element nil 'xs:|sequence|
-  '(:complex (:seq xs:|annotation|
-		   (:set* xs:|element| xs:|sequence| xs:|any| xs:|group| xs:|choice|))))
+  '(:complex (:seq? xs:|annotation|
+		   (:set* xs:|element| xs:|group| xs:|choice| xs:|sequence| xs:|any|))))
+
+;; <choice
+;;   id = ID
+;;   maxOccurs = (nonNegativeInteger | unbounded)  : 1
+;;   minOccurs = nonNegativeInteger : 1
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (element | group | choice | sequence | any)*)
+;; </choice>
 (define-xmp-element nil 'xs:|choice|
-  '(:complex (:seq xs:|annotation| 
-		   (:set* xs:|element| xs:|sequence| xs:|any| xs:|group| xs:|choice|))))
+  '(:complex (:seq? xs:|annotation| 
+		   (:set* xs:|element| xs:|group| xs:|choice| xs:|sequence| xs:|any|))))
   
+;; <any
+;;   id = ID
+;;   maxOccurs = (nonNegativeInteger | unbounded)  : 1
+;;   minOccurs = nonNegativeInteger : 1
+;;   namespace = ((##any | ##other)
+;;                | List of (anyURI | (##targetNamespace | ##local)) )  : ##any
+;;   processContents = (lax | skip | strict) : strict
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?)
+;; </any>
+(define-xmp-element nil 'xs:|any|            '(:complex (:seq? xs:|annotation|)))
+
+;; <anyAttribute
+;;   id = ID
+;;   namespace = ((##any | ##other)
+;;                | List of (anyURI | (##targetNamespace | ##local)) )  : ##any
+;;   processContents = (lax | skip | strict) : strict
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?)
+;; </anyAttribute>
 (define-xmp-element nil 'xs:|anyAttribute|   '(:complex (:set* xs:|annotation|)))
+
+;; <simpleType
+;;   final = (#all | List of (list | union | restriction))
+;;   id = ID
+;;   name = NCName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (restriction | list | union))
+;; </simpleType>
 (define-xmp-element nil 'xs:|simpleType|     '(:complex
-					       (:set* xs:|restriction|
-						      xs:|annotation|
-						      xs:|list|
-						      
-						      ;;???
-						      ;; This does not seem to be legal
-						      ;; XML Schema syntax but it does
-						      ;; occur in IHS Web Service def
-						      xs:|simpleContent|
-						      
-						      )))
+					       (:seq?
+						xs:|annotation|
+						(:or xs:|restriction|
+						     xs:|list|
+						     xs:|union|)
+						(:maybe
+						 ;; This does not seem to be legal
+						 ;; XML Schema syntax but it does
+						 ;; occur in IHS Web Service def
+						 xs:|simpleContent|
+						 )
+						)))
+
+
+;; <restriction
+;;   base = QName
+;;   id = ID
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: ( annotation?,
+;;              ( simpleType?,
+;;                ( minExclusive | minInclusive | maxExclusive | maxInclusive
+;;                  | totalDigits | fractionDigits | length | minLength | maxLength
+;;                  | enumeration | whiteSpace | pattern)*))
+;; </restriction>
+;;
+;; <restriction
+;;   base = QName
+;;   id = ID
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: ( annotation?,
+;;              ( simpleType?,
+;;                ( minExclusive | minInclusive | maxExclusive | maxInclusive
+;;                  | totalDigits | fractionDigits | length | minLength | maxLength
+;;                  | enumeration | whiteSpace | pattern)*)?,
+;;              ((attribute | attributeGroup)*, anyAttribute?))
+;; </restriction>
 (define-xmp-element nil 'xs:|restriction|
-  '(:complex (:set* xs:|pattern| xs:|attribute| xs:|sequence| xs:|enumeration|
-		    xs:|maxLength| xs:|maxlength|
-		    xs:|attributeGroup| xs:|minInclusive| xs:|maxInclusive|
-		    )))
-(define-xmp-element nil 'xs:|simpleContent|  '(:complex (:set* xs:|extension|)))
+  '(:complex (:seq? xs:|annotation|
+		   xs:|simpleType|
+		   (:set* xs:|minExclusive| xs:|minInclusive|
+			  xs:|maxExclusive| xs:|maxInclusive|
+			  xs:|totalDigits| xs:|fractionDigits|
+			  xs:|length| xs:|minLength| xs:|maxLength|
+			  xs:|enumeration|
+			  xs:|whiteSpace|
+			  xs:|pattern|)
+		   (:set* xs:|attribute| xs:|attributeGroup|)
+		   :xs|anyAttribute|
+		   (:maybe
+		    xs:|sequence|
+		    xs:|maxlength| ;;; mis-spelled in one WSDL at XMethods
+		    ))))
+
+;; <simpleContent
+;;   id = ID
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (restriction | extension))
+;; </simpleContent>
+(define-xmp-element nil 'xs:|simpleContent| 
+  '(:complex (:seq? xs:|annotation| (:set* xs:|restriction| xs:|extension|))))
+
+;; <union
+;;   id = ID
+;;   memberTypes = List of QName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, simpleType*)
+;; </union>
+(define-xmp-element nil 'xs:|union| '(:complex (:seq? xs:|annotation| 
+						     (:seq* xs:|simpleType|))))
+
+;; <extension
+;;   base = QName
+;;   id = ID
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, ((attribute | attributeGroup)*, anyAttribute?))
+;; </extension>
+;; 
+;; <extension
+;;   base = QName
+;;   id = ID
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: ( annotation?,
+;;              ( (group | all | choice | sequence)?,
+;;                ((attribute | attributeGroup)*, anyAttribute?)))
+;; </extension>
 (define-xmp-element nil 'xs:|extension|
-  '(:complex (:set* xs:|sequence| xs:|attribute| xs:|attributeGroup|)))
+  '(:complex (:seq? xs:|annotation|
+		   (:or xs:|group| xs:|all| xs:|choice| xs:|sequence|)
+		   (:set* xs:|attribute| xs:|attributeGroup|)
+		   xs:|anyAttribute|
+		   )))
 
+;; <enumeration
+;;   id = ID
+;;   value = anySimpleType
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?)
+;; </enumeration>
+(define-xmp-element nil 'xs:|enumeration| '(:complex (:seq? xs:|annotation|)))
+
+;; <complexContent
+;;   id = ID
+;;   mixed = boolean
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (restriction | extension))
+;; </complexContent>
 (define-xmp-element nil 'xs:|complexContent|
-  '(:complex (:seq1 (:seq xs:|annotation|) (:or xs:|restriction| xs:|extension|))))
+  '(:complex (:seq? xs:|annotation|
+		   (:or xs:|restriction| xs:|extension|))))
 
+;; <field
+;;   id = ID
+;;   xpath = a subset of XPath expression, see below
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?)
+;; </field>
+(define-xmp-element nil 'xs:|field|   '(:complex (:seq? xs:|annotation|)))
+
+(define-xmp-element nil 'xs:|length|  '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|import|  '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|include| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|pattern| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|selector| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|maxInclusive| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|minInclusive| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|maxExclusive| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|minExclusive| '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|maxLength|    '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|maxlength|    '(:complex (:seq? xs:|annotation|)))
+(define-xmp-element nil 'xs:|minLength|    '(:complex (:seq? xs:|annotation|)))
+
+;; <key
+;;   id = ID
+;;   name = NCName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (selector, field+))
+;; </key>
+(define-xmp-element nil 'xs:|key|     '(:complex (:seq? xs:|annotation|
+							(:seq1 xs:|selector|)
+							(:seq+ xs:|field|)
+							)))
+
+;; <keyref
+;;   id = ID
+;;   name = NCName
+;;   refer = QName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (selector, field+))
+;; </keyref>
+(define-xmp-element nil 'xs:|keyref|  '(:complex (:seq? xs:|annotation|
+							(:seq1 xs:|selector|)
+							(:seq+ xs:|field|)
+							)))
+
+;; <unique
+;;   id = ID
+;;   name = NCName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, (selector, field+))
+;; </unique>
+(define-xmp-element nil 'xs:|unique|  '(:complex (:seq? xs:|annotation|
+							(:seq1 xs:|selector|)
+							(:seq+ xs:|field|)
+							)))
+
+;; <list
+;;   id = ID
+;;   itemType = QName
+;;   {any attributes with non-schema namespace . . .}>
+;;   Content: (annotation?, simpleType?)
+;; </list>
+(define-xmp-element nil 'xs:|list|    '(:complex (:seq? xs:|annotation|
+						       xs:|simpleType|)))
 
 
 (defmethod xmp-decode-element :around ((conn schema-file-connector)

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapval1.cl,v 2.4 2005/09/06 17:10:28 layer Exp $
+;; $Id: soapval1.cl,v 2.5 2005/11/22 00:48:04 mm Exp $
 
 ;; SOAP server example
 ;; This example may be submitted to the SOAP validator at http://www.soapware.org/
@@ -386,8 +386,8 @@
     (:seq
      
      ;;(:element "num" xsd:|int|)
-     ;;"num" 
-     (:or (:element "num1" xsd:|int|)
+     "num" 
+     #+ignore(:or (:element "num1" xsd:|int|)
 	  (:element "num2" xsd:|int|))
 
      (:element "bool" xsd:|boolean|)

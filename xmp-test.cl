@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.6 2005/10/03 20:20:22 layer Exp $
+;; $Id: xmp-test.cl,v 2.7 2005/11/22 00:48:04 mm Exp $
 
 ;; Internal-use test cases
 
@@ -26,21 +26,37 @@
 (eval-when (compile load eval)
 
   (let* ((module (ecase *current-case-mode*
-		  (:case-sensitive-lower :soapm)
-		  (:case-insensitive-upper :soapa)))
-	(file (string-downcase (format nil "~A.fasl"  module))))
-    (when (probe-file file)
-      (load file)
-      (provide module)
-      (provide :soap))
+		   (:case-sensitive-lower :soapm)
+		   (:case-insensitive-upper :soapa)))
+	 (file (string-downcase (format nil "~A.fasl"  module))))
+    (or (member :soap *modules* :test #'string-equal)
+	(when (probe-file file)
+	  (load file)
+	  (provide module)
+	  (provide :soap)))
     (require :soap)
     (require :tester)
     )
-  
+  )
+
+(eval-when (compile)
   ;; always compile these to avoid casemode problems
+  (load (compile-file "xmp-mtest.cl"))
   (load (compile-file "soapval1.cl"))
   (load (compile-file "soapex.cl"))
   (load (compile-file "bignum-server.cl"))
+  )
+(eval-when (eval)
+  (load (compile-file "xmp-mtest.cl"))
+  (load (compile-file "soapval1.cl"))
+  (load (compile-file "soapex.cl"))
+  (load (compile-file "bignum-server.cl"))
+  )
+(eval-when (load)
+  (load "xmp-mtest")
+  (load "soapval1")
+  (load "soapex")
+  (load "bignum-server")
   )
 
 (defpackage :user (:use :net.xmp.soap  :util.test)) 
@@ -83,15 +99,19 @@ Individual tests:
 (bn-wsdl) --> bn.wsdl
   (decode-wsdl-file "bn.wsdl")
   (make-client-interface * 0 "bn-client.cl")  --> bn-client.cl ==> try with SOAPScope 
-
+(ss4)       ;;; anyType encoding
 
 - interacting with xmethods.com -
 (xmeth-def)          ;; decode xmeth.wsdl
 (xmeth-get)          ;; get list of methods from server
 (xmeth-read)          ;; read local list of methods
 (xmeth-save)          ;; save local list of methods
-(xmeth-one-remote [i [errorp [folder]]])   ;; fetch and parse one WSDL def from server
-(xmeth-one-local [i [errorp [folder]]])   ;; fetch and parse one local WSDL def
+
+;; fetch and parse one WSDL def from server
+(xmeth-one-remote [:i i [:errorp errorp [:folder folder]]])
+;; fetch and parse one local WSDL def
+(xmeth-one-local [:i i [:errorp errorp [:folder folder]]])
+
 (xmeth-all-remote)         ;; run through all remote xmethods
 (xmeth-all-local)         ;; run through all local xmethods
 
@@ -117,6 +137,7 @@ Individual tests:
 
 (defun soap-local-tests ()
   (and 
+   (test nil (null (test-decoder-all)))
    (test nil (null (xmp-match-tests)))
    (test nil (null (xmp-break-tests)))
 
@@ -147,7 +168,7 @@ Individual tests:
        (:name "Xmethods (fetch external WSDL)")
        (setf *error-protect-tests* t)
        (setf r (and 
-		(test-no-error (xmeth-def :uri))
+		(test-no-error (xmeth-def :source :uri))
 		(test-no-error (xmeth-get))
 		(test-no-error (xmeth-save))
 		(progn (xmeth-all-remote) t)
@@ -183,9 +204,9 @@ Individual tests:
 
 
 
-(defun s1 () (net.xmp::decode-schema "envelope.xml"))
-(defun s2 () (net.xmp::decode-schema "encoding.xml"))
-;;(defun s3 () (net.xmp::decode-schema "XMLSchema.xml"))
+(defun s1 () (net.xmp::decode-schema :file "envelope.xml"))
+(defun s2 () (net.xmp::decode-schema :file "encoding.xml"))
+;;(defun s3 () (net.xmp::decode-schema :file "XMLSchema.xml"))
 
 (defun sp (&optional (n 1) (d :warn) (u nil))
   (let ((s (soap-message-client :lisp-package :keyword
@@ -421,6 +442,83 @@ Individual tests:
       (setf net.aserve::*enable-logging* oldlog)
       )
     ))
+
+
+
+
+;;??? test encoders for anyType
+
+(define-soap-element nil 'ss1::soap-method-4
+  '(:complex (:seq (:element :|elt1| xsd:|anyType|))
+	     :action "uri:method4"
+	     ))
+(define-soap-element nil 'ss1::soap-result-4 
+  '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
+(defun soap-method-4 (&key |elt1|)
+  (list 'ss1::result (typecase |elt1| (sequence (length  |elt1|)) (otherwise -1))))
+
+(defun ss4 (&key log (init nil) (extend nil) (path "/SOAP") debug (stop t))
+  (let* ((oldlog net.aserve::*enable-logging*)
+	 (server (soap-message-server :start `(:port 0)
+				      :publish `(:path ,path)
+				      :lisp-package :keyword
+				      :message-dns '(nil (:ss1))
+				      :soap-debug
+				      (case debug ((:client nil) nil) (otherwise t))
+				      ))
+	 (port (socket:local-port
+		(slot-value (net.xmp::xmp-aserve-server server) 'net.aserve::socket)))
+	 (url (format nil "http://localhost:~A~A" port path))
+	 )
+    (setf net.aserve::*enable-logging* log)
+    (soap-export-method server 'ss1::soap-method-4 '(:|elt1|)
+			:return 'ss1::soap-result-4
+			:action "uri:method4"
+			:lisp-name 'soap-method-4)
+    (unwind-protect
+	(let* (client result (length 17)
+		      (string (make-string length :initial-element #\a)))
+	    
+	    ;; make a new client each time around to start with fresh
+	    ;; message buffer each time
+	    (setf client (soap-message-client :url url
+					    :lisp-package :keyword
+					    :message-dns '(nil (:ss1))
+					    :message-init
+					    (if extend (list init extend) init)
+					    :soap-debug
+					    (case debug
+					      ((:server nil) nil)
+					      (otherwise t))
+					    ))
+	    (or (eql
+		 length
+		 (soap-result-only
+		  client 
+		  (setf 
+		   result
+		   (call-soap-method 
+		    client 'ss1::soap-method-4 :|elt1| string))
+		  t 'ss1::soap-result-4 'ss1::result))
+		(error "Not eql ~S ~S" length result))
+	    (or (eql
+		 2
+		 (soap-result-only
+		  client 
+		  (setf 
+		   result
+		   (call-soap-method 
+		    client 'ss1::soap-method-4 :|elt1| 17))
+		  t 'ss1::soap-result-4 'ss1::result))
+		(error "Not eql ~S ~S" length result))
+
+	  :ok)
+      (and stop server (stop-soap-server server))
+      (setf net.aserve::*enable-logging* oldlog)
+      )
+    ))
+
+
 
 
 (defpackage :amazon (:use))
@@ -933,15 +1031,17 @@ Individual tests:
 
 (define-namespace-map :xmeth-entry nil :all)
 
-(defun xmeth-def (&optional (source "xmeth.wsdl"))
+(defun xmeth-def (&key syntax (source "xmeth.wsdl"))
   (let ((w (typecase source
 	     ((member :uri)
 	      (decode-wsdl-at-uri "http://www.xmethods.net/wsdl/query.wsdl"
 				  :namespaces :decode
+				  :xml-syntax syntax 
 				  :base       :xmeth-base))
 	     ((or string pathname)
 	      (decode-wsdl-file source
 				:namespaces :decode
+				:xml-syntax syntax 
 				:base       :xmeth-base)))))
     (make-client-interface w 0 "xmeth-client.cl"
 			   :suffix :message :verbose t :map :xmeth-ns)
@@ -1043,7 +1143,7 @@ Individual tests:
 	(when text (close text))
 	))))
 
-(defun xmeth-one-remote (&optional (i 0) errorp (folder "xmethods"))
+(defun xmeth-one-remote (&key (i 0) errorp syntax (folder "xmethods"))
   ;; fetch WSDL from URL
   (let* ((name (read-from-string (format nil ":xmeth~3,'0D" i))))
     (xmeth-errorp
@@ -1065,22 +1165,23 @@ Individual tests:
 		    (let ((nb (position #\space string :test-not #'eql)))
 		      (string-equal "<?xml " string :start2 nb :end2 (+ nb 6))))
 	       (error "Reply is not XML"))
-	   (xmeth-body i folder name)
+	   (xmeth-body i folder name syntax)
 	   )))))
 
-(defun xmeth-one-local (&optional (i 0) errorp (folder "xmethods"))
+(defun xmeth-one-local (&key (i 0) errorp (folder "xmethods") syntax)
   ;; assume WSDL is in local file
   (let* ((name (read-from-string (format nil ":xmeth~3,'0D" i))))
     (xmeth-errorp
      errorp i (format nil "~A/~A-2.txt" folder name)
-     #'(lambda (i) (xmeth-body i folder name)))))
+     #'(lambda (i) (xmeth-body i folder name syntax)))))
 
-(defun xmeth-body (i folder name)
+(defun xmeth-body (i folder name syntax)
   (let* (vals (path (format nil "~A/~A.xml" folder name)))
     (or (probe-file path) (error "XML file not found."))
     (setf vals (multiple-value-list
 		(decode-wsdl-file path
 				  :namespaces :decode
+				  :xml-syntax syntax
 				  :base
 				  (list nil 
 					:xmeth-entry
@@ -1156,24 +1257,24 @@ Individual tests:
 	  (+ *ok* *bad*))
   )
 
-(defun xmeth-all-remote (&optional (start 0) (end (length *xmethods*) e-p))
+(defun xmeth-all-remote (&key (start 0) syntax (end (length *xmethods*) e-p))
   ;; fetch WSDL from URLs
   (xmeth-load)
   (or e-p (setf end (length *xmethods*)))
   (dribble "xmeth.log")
   (setf *errors* nil *ok* 0 *bad* 0)
-  (dotimes (i end) (or (< i start) (xmeth-one-remote i)))
+  (dotimes (i end) (or (< i start) (xmeth-one-remote :i i :syntax syntax)))
   (xmeth-summary t)
   (xmeth-save)
   (dribble))
 
-(defun xmeth-all-local (&optional (start 0) (end (length *xmethods*) e-p))
+(defun xmeth-all-local (&key (start 0) syntax (end (length *xmethods*) e-p))
   ;; scan local WSDL files
   (xmeth-load)
   (or e-p (setf end (length *xmethods*)))
   (setf *errors* nil *ok* 0 *bad* 0)
   (dribble "xmeth.log")
-  (dotimes (i end) (or (< i start) (xmeth-one-local i)))
+  (dotimes (i end) (or (< i start) (xmeth-one-local :i i :syntax syntax)))
   (xmeth-summary t)
   (xmeth-save)
   (dribble))
@@ -1461,3 +1562,28 @@ Individual tests:
 
 
 	    
+(defun sc01 (&optional syntax)
+  (net.xmp::decode-schema
+   :verbose t :syntax  syntax
+   :string "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><xsd:schema targetNamespace=\"http://www.myweb-services.com\" xmlns:xsd='http://www.w3.org/2001/XMLSchema'
+>
+ <xsd:import namespace=\"http://schemas.xmlsoap.org/soap/encoding/\" />
+ <xsd:import namespace=\"http://schemas.xmlsoap.org/wsdl/\" />
+ <xsd:complexType name=\"SearchStruct\">
+  <xsd:all>
+   <xsd:element name=\"SearchEngineName\" type=\"xsd:string\"/>
+   <xsd:element name=\"SearchTitle\" type=\"xsd:string\"/>
+   <xsd:element name=\"SearchLink\" type=\"xsd:string\"/>
+   <xsd:element name=\"SearchDescription\" type=\"xsd:string\"/>
+  </xsd:all>
+ </xsd:complexType>
+ <xsd:complexType name=\"ArrayOfSearchStruct\">
+  <xsd:complexContent>
+   <xsd:restriction base=\"SOAP-ENC:Array\">
+    <xsd:attribute ref=\"SOAP-ENC:arrayType\" wsdl:arrayType=\"tns:SearchStruct[]\"/>
+   </xsd:restriction>
+  </xsd:complexContent>
+ </xsd:complexType>
+</xsd:schema>
+
+"))

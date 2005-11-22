@@ -1,3 +1,21 @@
+
+2005-11-21    <mm@PROA>
+
+	* build.cl (filenames): stop using Gray stream in fasl copy
+	* xmp-base.cl (xmp-lookup): add delete keyword
+	      (define-xmp-element): when type-spec is nil, delete the definition
+	* xmp-base.cl: add new connector initarg :xml-syntax
+	* xmp-wsdl.cl (encode-wsdl-file): add types and elements arguments [rfe6381]
+	* xmp-wsdl.cl (decode-wsdl-source): add stream argument
+	* xmp-wsdl.cl (decode-wsdl-source): add xml-syntax arg
+	* xmp-soap.cl (soap-make-fault): export, code arg may be keyword
+	          (xmp-server-implementation): LispError is a sub-code [bug15790]
+	* xmp-soap.cl (soap-encode-parts): encode simple value for anyType [bug15783]
+	* xmp-mtest.cl: NEW FILE systematic testing of XML Schema parser
+	* xmp-schema.cl: update all Schema element defs from spec, use :seq? [bug15774]
+	* xmp-test.cl (ss4): add test for encoding simple value for anyType
+
+	
 2005-09-30    <mm@PROA>
 
 	* xmp-test.cl (run3): new test for asjusr-array strategy args
@@ -375,4 +393,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.9 $
+$Revision: 2.10 $

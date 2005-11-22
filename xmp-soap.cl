@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.7 2005/10/03 20:20:22 layer Exp $
+;; $Id: xmp-soap.cl,v 2.8 2005/11/22 00:48:04 mm Exp $
 
 ;; SOAP support
 
@@ -207,6 +207,7 @@
    soap-message-body
    soap-get-attribute 
    soap-get-attributes 
+   soap-make-fault
 
    *soap-server-debug*
    *soap-client-debug*
@@ -925,7 +926,11 @@
 				 ((and name arg) (values name arg))
 				 (n2 (values n2 nil))
 				 (t (values name arg)))))	      
-	      (encode (key defs opts &aux name arg (def '#:none) prop)
+	      (encode (key defs opts &aux name arg (default '#:none) prop)
+		      ;;  key      defs
+		      ;;  nil      (:any) | (:element ...) | complex-def
+		      ;; collector complex-def-tail
+		      ;; :element  name | 
 		      (ecase key
 			;; return two values:
 			;;    the name of an element or an element-def
@@ -985,39 +990,74 @@
 			(:any
 			 (when parts 
 			   (setf arg t)
-			   (multiple-value-bind (type-def name)
-			       (soap-find-element conn (first parts) :out)
-			     (if type-def
-				 (soap-encode-element
-				  conn name (second parts) :name name)
-			       (soap-encode-element
-				conn name (second parts) :name name
-				:type 'enc:|string|)))
-			   (setf parts (cddr parts)))
+			   (cond ((atom parts)   ;;; [bug15783]
+				  (xmp-encode conn parts 'enc:|string|)
+				  (setf parts nil))
+				 (t 
+				  (multiple-value-bind (type-def name)
+				      (soap-find-element conn (first parts) :out)
+				    (if type-def
+					(soap-encode-element
+					 conn name (second parts) :name name)
+				      (soap-encode-element
+				       conn name (second parts) :name name
+				       :type 'enc:|string|)))
+				  (setf parts (cddr parts)))))
 			 (values (or name :any) arg))
 			(:element
-			 (cond ((and (consp defs) (null (second defs)))
-				(when parts 
-				  (setf arg t)
-				  (setf name
-					(soap-encode-element
-					 conn (first parts) (second parts)
-					 :name (first parts)
-					 :type (when (consp defs) (third defs))
-					 ))
-				  (setf parts (cddr parts)))
-				(values name arg))
-			       (t (typecase defs
-				    (cons (setf name (xmp-pick-name conn defs)))
-				    (otherwise (setf name defs)))
-				  (setf arg def)
-				  (when (setf prop (xmp-elt-getf-name conn parts defs))
-				    (setf name prop)
-				    (setf arg (getf parts prop def))
-				    (when (not (eq arg def))
-				      (soap-encode-element conn defs arg :name prop)
-				      (drop prop)))
-				  (values name (when name (not (eq arg def)))))))
+			 (cond
+			  ((and (consp defs) (null (second defs)))
+			   ;; This is an un-named element def,
+			   ;; take the first argument name and value.
+			   (when parts 
+			     (setf arg t)
+			     (setf name
+				   (soap-encode-element
+				    conn (first parts) (second parts)
+				    :name (first parts)
+				    :type (when (consp defs) (third defs))
+				    ))
+			     (setf parts (cddr parts)))
+			   (values name arg))
+			  (t 
+				
+			   ;;???
+			   ;; if element is named "num"
+			   ;; and "num" is defined as (:or "num1" "num2")
+			   ;; then we should look for "num1" or "num2" in the
+			   ;; argument list - not "num"
+				
+			   (let* ((edef defs)
+				  (type (if (consp edef)
+					    (soap-resolve-type
+					     conn (third edef) :out)
+					  (soap-resolve-type
+					   conn 
+					   (or (soap-find-element conn edef :out)
+					       (error "Undefined element ~S" edef))
+					   :out)))
+				  ctail)
+			     (if (and (consp type)
+				      (eq :complex (first type))
+				      (consp (setf ctail (second type)))
+				      (eq :or (pop ctail))
+				      (or (atom (first ctail))
+					  (eq :element (first (first ctail))))
+				      )
+				 (encode :or ctail opts)
+			       (progn
+				 (typecase edef
+				   (cons (setf name (xmp-pick-name conn edef)))
+				   (otherwise (setf name edef)))
+				 (setf arg default)
+				 (when (setf prop (xmp-elt-getf-name conn parts edef))
+				   (setf name prop)
+				   (setf arg (getf parts prop default))
+				   (when (not (eq arg default))
+				     (soap-encode-element
+				      conn edef arg :name prop)
+				     (drop prop)))
+				 (values name (when name (not (eq arg default))))))))))
 			))
 	      (drop (name)
 		    (if (eq name (first parts))
@@ -1121,12 +1161,28 @@
 			  (actor  (soap-result-string
 				   conn res nil :body :fault "faultactor"))
 			  ec esub)
-		     (cond ((null code) (setf ec :client))
-			   ((and (not (symbolp code)) (not (stringp code)))
-			    (setf ec :client esub code))
-			   ((string-equal code "client") (setf ec :client))
-			   ((string-equal code "server") (setf ec :server))
-			   (t (setf ec :client esub code)))
+		     (typecase code
+		       (null (setf ec :client esub nil))
+		       ((or string symbol) (let* ((str (string code))
+						  (dot (position #\. str))
+						  (hd (if dot
+							  (subseq str 0 dot)
+							str))
+						  (tl (if dot
+							  (subseq str (1+ dot))
+							nil)))
+					     (cond ((equal hd "Client") (setf ec :client
+									      esub tl))
+						   ((equal hd "Server") (setf ec :server
+									      esub tl))
+						   (t (setf ec (if (symbolp code)
+								   (intern
+								    hd
+								    (symbol-package 
+								     code))
+								 hd)
+							    esub tl)))))
+		       (otherwise (setf ec :client esub code)))
 		     (xmp-error conn 
 				(case ec
 				  (:server 'soap-server-fault)
@@ -2193,7 +2249,7 @@
     (setf *soap-last-server* server)
     (when (soap-debug-p server)
       (format t "~&   Server is Enabled.~%"))
-    (let* (code string rval vals body-error (body-done (list nil)))
+    (let* ((code 'env:|Client|) rval vals body-error (body-done (list nil)))
       (flet ((body
 	      ()
 	      (let* ((r (xmp-decode-message
@@ -2285,6 +2341,7 @@
 		(format t "~&   call failed: ~S ~A~%" v e)
 	      (format t "~&   call returned: ~S~%" (first vals))))
 	  (typecase e
+	    (null nil)
 	    (xmp-condition (setf rval (soap-make-fault
 				       server
 				       (xmp-fault-code e)
@@ -2292,11 +2349,9 @@
 				       :sub-code (xmp-fault-sub-code e)
 				       :factor (xmp-fault-factor e)
 				       :detail (xmp-fault-detail e))))
-	    ((member nil)
-	     (when code
-	       (setf rval (soap-make-fault server code string))))
 	    (otherwise
-	     (setf rval (soap-make-fault server :LispError (format nil "~A" e)))))
+	     (setf rval (soap-make-fault server code (format nil "~A" e)
+					 :sub-code "LispError"))))
 	  (setf rval (multiple-value-list (soap-encode-message server rval nil)))
 	  (when (soap-debug-p server)
 	    (format t "~&   encoded result element: ~S~%" (first rval))
@@ -2422,8 +2477,14 @@
 
 
 
-(defmethod soap-make-fault ((server soap-server-connector) code string
+(defmethod soap-make-fault ((server soap-connector) code string
 			    &key factor detail sub-code)
+  (setf code (case code
+	       (:server 'env:|Server|)
+	       (:client 'env:|Client|)
+	       (:version-mismatch 'env:|VersionMismatch|)
+	       (:must-understand  'env:|MustUnderstand|)
+	       (otherwise code)))
   (soap-encode-object server 
 		      'env:|Fault|
 		      nil
@@ -2431,7 +2492,7 @@
 			 ,(if sub-code
 			     (intern
 			      (format nil "~A.~A" code sub-code)
-			      (symbol-package code))
+			      (if (symbolp code) (symbol-package code) :keyword))
 			   code)
 			 :|faultstring| ,string
 			 ,@(when factor (list :|faultactor| factor))
@@ -2564,20 +2625,24 @@
     (soap-element-content (cdr v))))
 
 (defmethod soap-result-string ((conn t) r name &rest more &aux v)
-  ;; return a single string if list of strings
+  ;; return a single string if list of strings  (or chars)
+  ;;  otherwise return the result of soap-element-content
   (when (setf v (apply #'soap-result-pair conn r name more))
     (typecase (setf v (soap-element-content (cdr v)))
       (cons  (do ((tl v (cdr tl)) (len 0))
 		 ((atom tl)
-		  (do ((t2 v (cdr t2)) l2 (i 0) (res (make-string len)))
-		      ((atom t2) res)
-		    (typecase (first t2)
-		      (character (setf (elt res i) (first t2))
-				 (incf i))
-		      (string  (setf l2 (length (first t2)))
-			       (setf (subseq res i (+ i l2)) (first t2))
-			       (incf i l2)))
-		    ))
+		  (if tl
+		      v
+		    ;; Element content is all strings and chars, concatenate.
+		    (do ((t2 v (cdr t2)) l2 (i 0) (res (make-string len)))
+			((atom t2) res)
+		      (typecase (first t2)
+			(character (setf (elt res i) (first t2))
+				   (incf i))
+			(string  (setf l2 (length (first t2)))
+				 (setf (subseq res i (+ i l2)) (first t2))
+				 (incf i l2)))
+		      )))
 	       (typecase (first tl)
 		 (character (incf len))
 		 (string (incf len (length (first tl))))

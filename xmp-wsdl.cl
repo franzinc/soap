@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.7 2005/10/03 20:20:22 layer Exp $
+;; $Id: xmp-wsdl.cl,v 2.8 2005/11/22 00:48:04 mm Exp $
 
 ;; WSDL support
 
@@ -338,11 +338,11 @@
 (defun decode-wsdl-at-uri (uri &rest keys)
   (apply #'decode-wsdl-source :uri uri keys))
 
-(defun decode-wsdl-source (&key file 
+(defun decode-wsdl-source (&key uri string stream file 
 				(namespaces :decode)
 				(base :wsdl1-prefix)
 				(lisp-package :keyword)
-				string uri
+				xml-syntax
 				&aux (*xmp-warning-leader* "WSDL"))
   
 
@@ -355,10 +355,14 @@
 	  (setf string body)
 	(error "URI ~A returned error ~S ~S ~S"
 	       uri rc h ruri))))
-
+  (or file string stream (error "No source specified."))      
   (let* ((base-dns (wsdl-base-namespaces base))
 	 (dns (case namespaces
 		(:decode
+		 (or
+		  file string
+		  (error
+		   "When source is a stream, namespaces argument cannot be :decode."))
 		 (multiple-value-bind (ns other ambi missing)
 		     (decode-wsdl-namespaces
 		      :file file :string string :map base-dns)
@@ -379,6 +383,7 @@
 	 (conn (make-instance 'wsdl-file-connector
 			      :message-dns dns
 			      :base-dns base-dns
+			      :xml-syntax xml-syntax
 			      :source file :lisp-package lisp-package)))
 
     (values-list
@@ -386,7 +391,8 @@
       (list conn)
       (multiple-value-list 
        (cond (string (xmp-decode-string conn string))
-	     (file   (xmp-decode-file conn file))))))
+	     (file   (xmp-decode-file conn file))
+	     (stream (xmp-decode-stream conn stream))))))
     ))
 
 (defmethod schema-decode-attribute ((conn wsdl-file-connector)
@@ -2345,7 +2351,7 @@
 (defun encode-wsdl-file (file &key
 			      (namespaces '(:net.xmp.wsdl))
 			      (base (list nil :wsdl1-namespaces :all))
-			      servers
+			      servers types elements
 			      (target "urn:ThisWebServiceNamespace" t-p)
 			      target-package
 			      name
@@ -2435,6 +2441,8 @@
 			     (list (xnd-package nsd) (xnd-prefix nsd)
 				   (xnd-uri nsd))
 			     used-namespaces :test #'equal)))))))
+      (dolist (e elements) (wsdl-add-element-def conn e))
+      (dolist (d types) (wsdl-add-type conn d))
       (dolist (s (etypecase servers
 		   (null nil)
 		   (xmp-connector (list servers))
@@ -2793,6 +2801,13 @@
 	     elt def))
 	 )))))
 
+(defmethod wsdl-add-element-def ((conn wsdl-file-connector) elt &aux def)
+  (setf def (soap-find-element conn elt :dns))
+  (cond
+   ((null def)
+    (error "Cannot find element definition ~S" elt))
+   (t    (wsdl-add-element conn elt def nil) )))
+
 (defmethod wsdl-make-name ((conn wsdl-file-connector) prefix &aux place)
   (with-slots
    (counters name-prefix) conn
@@ -2858,8 +2873,10 @@
 				 &aux tdef min max schema)
   (setf tdef indef)
   (and tdef (atom tdef)
-       ;; In this case, it is always an element name [bug15508]
-       (setf tdef (wsdl-resolve-element conn tdef)))
+       ;; In this case, it may be an element name [bug15508]
+       (setf tdef (wsdl-resolve-element conn tdef))
+       (setf tdef (wsdl-resolve-type conn tdef))
+       )
   (case (first tdef)
 
     ;; If element type is not named, then we can emit

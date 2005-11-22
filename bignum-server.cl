@@ -1,5 +1,5 @@
 
-;; $Id: bignum-server.cl,v 2.1 2005/08/03 05:09:48 layer Exp $ 
+;; $Id: bignum-server.cl,v 2.2 2005/11/22 00:48:04 mm Exp $ 
 
 (in-package :user)
 
@@ -192,6 +192,14 @@
        client 'bn::|decodeNum| "num" "12345" "base" 10))
      client)))
 
+(defun try-calc (op n1 n2 &key debug (port 1776) (host "localhost"))
+  (let ((client (soap-message-client 
+		 :url (format nil "http://~A:~A/SOAP" host port)
+		 :soap-debug debug
+		 :lisp-package :keyword
+		 )))
+    (call-soap-method
+     client 'bn::|calculate| "opname" op "num1" n1 "num2" n2)))
 
 
 (defun bn-wsdl ()
