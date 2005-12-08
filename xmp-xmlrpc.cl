@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp.xmlrpc -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2004 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2005 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-xmlrpc.cl,v 2.1 2004/01/16 19:37:23 layer Exp $
+;; $Id: xmp-xmlrpc.cl,v 2.2 2005/12/08 21:10:51 layer Exp $
 
 ;; Support for XMLRPC protocol over HTTP.
 
