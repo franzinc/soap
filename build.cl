@@ -1,5 +1,5 @@
 
-;; $Id: build.cl,v 2.4 2005/11/22 00:48:04 mm Exp $ 
+;; $Id: build.cl,v 2.5 2006/01/05 22:46:06 layer Exp $ 
 
 (in-package :user)
 
@@ -23,7 +23,7 @@
    (out soap-cl :direction :output :if-exists :supersede
 	:if-does-not-exist :create)
    (print `(in-package :user) out)
-   #+ignore
+   #+(version= 7 0)
    (print `(sys:defpatch ,(ecase *current-case-mode*
 			    (:case-sensitive-lower :soapm)
 			    (:case-insensitive-upper :soapa))
@@ -34,6 +34,17 @@
 			 :type :system
 			 :post-loadable t)
 	  out)
+   #+(version= 6 2)
+   (print `(sys:defpatch ,(ecase *current-case-mode*
+			     (:case-sensitive-lower :soapm)
+			     (:case-insensitive-upper :soapa))
+		4
+	      ,(ecase *current-case-mode*
+		 (:case-sensitive-lower "SOAPM code")
+		 (:case-insensitive-upper  "SOAPA code"))
+	      :type :system
+	      :post-loadable t)
+	   out)
    (terpri out))
   (compile-file soap-cl)
   

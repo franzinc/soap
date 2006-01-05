@@ -1,3 +1,8 @@
+2006-01-05  Kevin Layer  <layer@gemini>
+
+	* build.cl,
+	* soap.cl: add defpatch's for 6.2 and 7.0
+
 2005-11-22    <mm@PROA>
 
 	* xmp-wsdl.cl (define-wsdl-names): new fn collects all WSDL definitions
@@ -411,4 +416,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.11 $
+$Revision: 2.12 $
