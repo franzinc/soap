@@ -1,5 +1,5 @@
 
-;; $Id: build.cl,v 2.5 2006/01/05 22:46:06 layer Exp $ 
+;; $Id: build.cl,v 2.6 2006/01/11 01:08:05 mm Exp $ 
 
 (in-package :user)
 
@@ -27,7 +27,7 @@
    (print `(sys:defpatch ,(ecase *current-case-mode*
 			    (:case-sensitive-lower :soapm)
 			    (:case-insensitive-upper :soapa))
-			 2
+			 3
 			 ,(ecase *current-case-mode*
 			    (:case-sensitive-lower "SOAPM code")
 			    (:case-insensitive-upper  "SOAPA code"))

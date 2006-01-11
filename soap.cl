@@ -17,18 +17,22 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soap.cl,v 2.5 2006/01/05 22:46:06 layer Exp $
+;; $Id: soap.cl,v 2.6 2006/01/11 01:08:05 mm Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
 
 #+(version= 7 0)
-(sys:defpatch "soap" 2 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
-  "v1: bug fixes and improved handling of some SOAP messages."
+(sys:defpatch "soap" 3 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+  "v1: bug fixes and improved handling of some SOAP messages;
+v3: bring up to ACL 8.0 level."
   :type :system
   :post-loadable t)
 
+;; asof 2006-01-10 this patch level (5) has not been built or tested
+;;  if there is a request for a 6.2 patch, this work will need to be done
+#+(version= 6 2)(eval-when (compile load eval) (error "not ready for release"))
 #+(version= 6 2)
-(sys:defpatch "soap" 4 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+(sys:defpatch "soap" 5 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
   "v0: The Allegro SOAP client;
 v1: SOAP server;
 v2: WSDL input;
