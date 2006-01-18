@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.9 2005/12/08 21:10:51 layer Exp $
+;; $Id: xmp-test.cl,v 2.10 2006/01/18 21:07:23 mm Exp $
 
 ;; Internal-use test cases
 
@@ -90,7 +90,9 @@ Individual tests:
 (bn-wsdl) --> bn.wsdl
   (decode-wsdl-file "bn.wsdl")
   (make-client-interface * 0 "bn-client.cl")  --> bn-client.cl ==> try with SOAPScope 
-(ss4)       ;;; anyType encoding
+
+(run4)       ;;; anyType encoding
+(run5)       ;;; nillable elements
 
 - interacting with xmethods.com -
 (xmeth-def)          ;; decode xmeth.wsdl
@@ -137,6 +139,8 @@ Individual tests:
    (test :all-ok (test-validator1))
    (test t (test-bn))
    (test-no-error (stop-soap-server (symbol-value '*bn-server*)))
+   (run4)
+   (run5)
    ))
 
 (defun test-soap-remote (&aux r)
@@ -147,10 +151,9 @@ Individual tests:
   r)
 
 (defun soap-remote-tests ()
-
-   (test nil (null (test-clients)))
-
-   )
+  (load (compile-file "soapex.cl")) ;; to make sure namespaces are defined
+  (test nil (null (test-clients)))
+  )
 
 (defun test-soap-x (&optional remote &aux r)
   (if remote 
@@ -486,78 +489,217 @@ Individual tests:
 
 ;;??? test encoders for anyType
 
-
 (defun soap-method-4 (&key |elt1|)
-  (list 'ss1::result (typecase |elt1| (sequence (length  |elt1|)) (otherwise -1))))
+  (list 'ss1::result (typecase |elt1|
+		       (string (length  |elt1|))
+		       (cons (length (format nil "~A" |elt1|)))
+		       (otherwise -1))))
 
-(defun ss4 (&key log (init nil) (extend nil) (path "/SOAP") debug (stop t))
-
-  (define-soap-element nil 'ss1::soap-method-4
-    '(:complex (:seq (:element :|elt1| xsd:|anyType|))
-	       :action "uri:method4"
-	       ))
-  (define-soap-element nil 'ss1::soap-result-4 
-    '(:complex (:seq (:element ss1::result (:simple xsd:|int|)))))
-
-  (let* ((oldlog net.aserve::*enable-logging*)
-	 (server (soap-message-server :start `(:port 0)
-				      :publish `(:path ,path)
-				      :lisp-package :keyword
-				      :message-dns '(nil (:ss1))
-				      :soap-debug
-				      (case debug ((:client nil) nil) (otherwise t))
-				      ))
-	 (port (socket:local-port
-		(slot-value (net.xmp::xmp-aserve-server server) 'net.aserve::socket)))
-	 (url (format nil "http://localhost:~A~A" port path))
-	 )
-    (setf net.aserve::*enable-logging* log)
-    (soap-export-method server 'ss1::soap-method-4 '(:|elt1|)
-			:return 'ss1::soap-result-4
-			:action "uri:method4"
-			:lisp-name 'soap-method-4)
-    (unwind-protect
-	(let* (client result (length 17)
-		      (string (make-string length :initial-element #\a)))
-	    
-	  ;; make a new client each time around to start with fresh
-	  ;; message buffer each time
-	  (setf client (soap-message-client :url url
-					    :lisp-package :keyword
-					    :message-dns '(nil (:ss1))
-					    :message-init
-					    (if extend (list init extend) init)
-					    :soap-debug
-					    (case debug
-					      ((:server nil) nil)
-					      (otherwise t))
-					    ))
-	  (or (eql
-	       length
-	       (soap-result-only
-		client 
-		(setf 
-		 result
-		 (call-soap-method 
-		  client 'ss1::soap-method-4 :|elt1| string))
-		t 'ss1::soap-result-4 'ss1::result))
-	      (error "Not eql ~S ~S" length result))
-	  (or (eql
-	       2
-	       (soap-result-only
-		client 
-		(setf 
-		 result
-		 (call-soap-method 
-		  client 'ss1::soap-method-4 :|elt1| 17))
-		t 'ss1::soap-result-4 'ss1::result))
-	      (error "Not eql ~S ~S" length result))
-
+(defun run4 (&key debug new)
+  (soap-test-run
+   :new new
+   :debug debug
+   :dns '(nil (:ss1))
+   :server '(:decode-flag nil)
+   :client '(:decode-flag nil)
+   :define
+   #'(lambda ()
+       (define-namespace :ss1 "ss1" "urn:SS1NS")
+       (define-soap-element nil 'ss1::soap-method-4
+	 '(:complex (:seq (:element :|elt1| xsd:|anyType|))
+		    :action "uri:method4"
+		    ))
+       (define-soap-element nil 'ss1::soap-result-4 
+	 '(:complex (:seq (:element ss1::result (:simple xsd:|int|))))))
+   :export
+   #'(lambda (server)
+       (soap-export-method server 'ss1::soap-method-4 '(:|elt1|)
+			   :return 'ss1::soap-result-4
+			   :action "uri:method4"
+			   :lisp-name 'soap-method-4))
+   :call
+   #'(lambda (client)
+       (let* ((length 17)
+	      (string (make-string length :initial-element #\a)))
+	 (and 
+	  (test
+	   length
+	   (soap-result-only
+	    client 
+	    (call-soap-method 
+	     client 'ss1::soap-method-4 :|elt1| string)
+	    t 'ss1::soap-result-4 'ss1::result))
+	  (test
+	   2
+	   (soap-result-only
+	    client 
+	    (call-soap-method 
+	     client 'ss1::soap-method-4 :|elt1| 17)
+	    t 'ss1::soap-result-4 'ss1::result))
+	  (test
+	   12 ;; "((foo 1223))"
+	   (soap-result-only
+	    client 
+	    (call-soap-method 
+	    client 'ss1::soap-method-4 :|elt1|
+	    (soap-encode-object client :foo '(:simple xsd:|string|) (list 12 23)))
+	    t 'ss1::soap-result-4 'ss1::result))
 	  :ok)
-      (and stop server (stop-soap-server server))
+	 
+	 ))
+   ))
+     
+
+
+      
+
+
+(defun soap-test-run (&key new define export call 
+			   dns debug (port 0) (path "/SOAP") (stop t)
+			   log (lisp :keyword) server client)
+  (when new (soap-new-environment))
+  (when define (funcall define))
+  (let* ((oldlog net.aserve::*enable-logging*)
+	 (server-instance (apply #'soap-message-server :start `(:port ,port)
+				 :publish `(:path ,path)
+				 :lisp-package lisp
+				 :message-dns dns
+				 :soap-debug
+				 (case debug ((:client nil) nil) (otherwise t))
+				 server))
+	 (sock (slot-value net.aserve:*wserver* 'net.aserve::socket))
+	 (lport (socket:local-port sock))
+	 (url (format nil "http://localhost:~A~A" lport path))
+	 client-instance result)
+    (setf net.aserve::*enable-logging* log)
+    (when export (funcall export server-instance))
+    (unwind-protect
+	(let ()		  
+	  (setf client-instance (apply #'soap-message-client :url url
+				       :lisp-package lisp
+				       :message-dns dns
+				       :soap-debug
+				       (case debug
+					 ((:server nil) nil)
+					 (otherwise t))
+				       client))
+	  (when call (setf result (funcall call client-instance))))
+      (and server-instance stop (stop-soap-server server-instance))
       (setf net.aserve::*enable-logging* oldlog)
       )
-    ))
+    (values result server-instance client-instance)))
+
+
+
+;; Test nillable elements and options [bug15971]
+(defun soap-method-5 (&rest args)
+	 (list 'ss1::result
+	       (format nil "~S" args)))
+
+(defvar *run5-attrs* nil)
+(defun run5-attrs (conn elt)
+  (declare (ignore conn elt))
+  *run5-attrs*)
+
+(defun run5-defs (&key nillable)
+  (define-namespace :ss1 "ss1" "urn:SS1NS")
+  (when nillable 
+    (define-soap-element nil :|elt2| '(:complex (:seq* :any))
+      :nillable t))
+  (define-soap-element nil
+    'ss1::soap-method-5
+    '(:complex (:seq (:element :|elt1| xsd:|string|))
+	       :action "uri:method5"))	       
+  (define-soap-element nil 'ss1::soap-result-5 
+    '(:complex (:seq (:element ss1::result (:simple xsd:|string|))))))
+
+(defun run5-export (server)
+       (soap-export-method server 'ss1::soap-method-5 '(:|elt1|)
+			   :return 'ss1::soap-result-5
+			   :action "uri:method5"
+			   :lisp-name 'soap-method-5))
+
+(defun run5-accept (client
+		    &aux
+		    (edef '(:element
+			    ss1::soap-method-5
+			    (:complex (:seq (:element :|elt1| xsd:|string|)
+					    (:element
+					     :|elt2|
+					     (:simple xsd:|string|
+						      :computed-attributes run5-attrs))
+					    )
+				      :action "uri:method5"
+				      )))
+		    )  
+  (flet ((result (attr str &rest args)
+		 (let ((*run5-attrs* `(xsi:|nil| ,attr)))
+		   (test
+		    (format nil "(~S ~S)" ':|elt1| str)
+		    (soap-result-string client
+					(apply 'call-soap-method 
+					       client edef args)
+					'ss1::soap-result-5 'ss1::result)
+		    :test #'equal)))
+	 (erret (attr &rest args)
+		(let ((*run5-attrs* `(xsi:|nil| ,attr)))
+		  (test-error
+		   (apply 'call-soap-method 
+			  client edef args)
+		   :condition-type 'net.xmp.soap::soap-client-fault
+		   )))
+	 )
+
+    (and (result "true" "str1" :|elt1| "str1" :|elt2| nil)
+	 (result "true" "str2" :|elt2| nil :|elt1| "str2")
+	 (result "1" "str3" :|elt1| "str3" :|elt2| nil)
+	 (result "1" "str4" :|elt2| nil :|elt1| "str4")
+	 (erret "false" :|elt1| "str5" :|elt2| nil)
+	 (erret "0" :|elt1| "str6" :|elt2| nil)
+	  )))
+
+
+(defun run5 (&key debug)
+  (and (run5a :debug debug :new t)
+       (run5b :debug debug :new t)
+       (run5c :debug debug :new t)))
+
+(defun run5a (&key debug new)
+  ;; default setting of client/server nillable (ie :accept)
+  (soap-test-run
+   :new new :debug debug
+   :define #'(lambda () (run5-defs))
+   :export #'run5-export
+   :call #'run5-accept 
+   :dns '(nil (:ss1))
+   ))
+
+(defun run5b (&key debug new)
+  ;; :strict setting
+  (soap-test-run
+   :new new :debug debug
+   :define #'(lambda () (run5-defs :nillable t))
+   :export #'run5-export
+   :client '(:nillable :strict)
+   :server '(:nillable :strict)
+   :call #'run5-accept 
+   :dns '(nil (:ss1))
+   ))
+
+(defun run5c (&key debug new)
+  ;; explicit :accept setting
+  (soap-test-run
+   :new new :debug debug
+   :define #'(lambda () (run5-defs))
+   :export #'run5-export
+   :client '(:nillable :accept)
+   :server '(:nillable :accept)
+   :call  #'run5-accept 
+   :dns '(nil (:ss1))
+   ))
+
+
+
 
 
 
@@ -1085,19 +1227,24 @@ Individual tests:
 
 #-(version>= 7) (mp:start-scheduler)   ;; to enable with-timeout
  
-(defpackage :tns (:use))
+(defpackage :tnsw (:use))
+(defpackage :tnst (:use))
 
-(define-namespace-map :xmeth-base
-  nil
-  '(:keyword
-    "tns3"
-    "http://www.xmethods.net/interfaces/query")
-  :all
-  '(:keyword nil :any))
 
-(define-namespace-map :xmeth-entry nil :all)
 
 (defun xmeth-def (&key syntax (source "xmeth.wsdl"))
+  (define-namespace-map :xmeth-base
+    nil
+    '(:tnsw
+      "tnsw"
+      "http://www.xmethods.net/interfaces/query.wsdl")
+    '(:tnst
+      "tnst"
+      "http://www.xmethods.net/interfaces/query.xsd")
+    :all
+    '(:keyword nil :any))
+
+  (define-namespace-map :xmeth-entry nil :all)
   (let ((w (typecase source
 	     ((member :uri)
 	      (decode-wsdl-at-uri "http://www.xmethods.net/wsdl/query.wsdl"

@@ -1,5 +1,5 @@
 
-;; $Id: build.cl,v 2.6 2006/01/11 01:08:05 mm Exp $ 
+;; $Id: build.cl,v 2.7 2006/01/18 21:07:23 mm Exp $ 
 
 (in-package :user)
 
@@ -23,37 +23,36 @@
    (out soap-cl :direction :output :if-exists :supersede
 	:if-does-not-exist :create)
    (print `(in-package :user) out)
-   #+(version= 7 0)
-   (print `(sys:defpatch ,(ecase *current-case-mode*
-			    (:case-sensitive-lower :soapm)
-			    (:case-insensitive-upper :soapa))
-			 3
-			 ,(ecase *current-case-mode*
-			    (:case-sensitive-lower "SOAPM code")
-			    (:case-insensitive-upper  "SOAPA code"))
-			 :type :system
-			 :post-loadable t)
-	  out)
-   #+(version= 6 2)
-   (print `(sys:defpatch ,(ecase *current-case-mode*
-			     (:case-sensitive-lower :soapm)
-			     (:case-insensitive-upper :soapa))
-		4
-	      ,(ecase *current-case-mode*
-		 (:case-sensitive-lower "SOAPM code")
-		 (:case-insensitive-upper  "SOAPA code"))
-	      :type :system
-	      :post-loadable t)
-	   out)
+
+   (flet ((patch-level
+	   (n)
+	   (print `(sys:defpatch ,(ecase *current-case-mode*
+				    (:case-sensitive-lower "soapm")
+				    (:case-insensitive-upper "soapa"))
+				 ,n
+				 ,(ecase *current-case-mode*
+				    (:case-sensitive-lower "SOAPM code")
+				    (:case-insensitive-upper  "SOAPA code"))
+				 :type :system
+				 :post-loadable t)
+		  out)))	       
+
+     #+(version= 8 0) (patch-level 1)
+     #+(version= 7 0) (patch-level 4)
+     #+(version= 6 2) (patch-level 5)
+     
+     )
+
    (terpri out))
   (compile-file soap-cl)
   
   (with-open-file
    (out soap-fasl
 	;;:element-type '(unsigned-byte 8)
-	:direction :output :if-exists :supersede 
+	:direction :output 
+	:if-exists :append  ;;; soapa.fasl or soapm.fasl was just written
 	:if-does-not-exist :create)
-   (dolist (file (append (list soap) filenames))
+   (dolist (file filenames)
      (with-open-file 
       (in (concatenate 'string file ".fasl")
 	  ;;:element-type '(unsigned-byte 8)

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.9 2005/12/08 21:10:51 layer Exp $
+;; $Id: xmp-base.cl,v 2.10 2006/01/18 21:07:23 mm Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -754,23 +754,7 @@
      (multiple-value-setq (elt attr) (xmp-element-parts conn data))
 
      (cond 
-      ((and elt attr
-	    (case (xmp-nillable conn)
-	      (:accept t)
-	      (:ignore nil)
-	      (:strict
-	       (xmp-lookup *defined-xmp-elements* elt elt nil :attribute :nillable)))
-	    ;; partial solution to [bug15528] 
-	    (let ((nillable (do ((tl attr (cddr tl)))
-				((atom tl) nil)
-			      (when (or (eq (first tl)
-					    (intern "nil" :net.xmp.schema-instance))
-					(equal "nil" (string (first tl))))
-				(return tl)))))
-	      (when nillable
-		(and (or (equalp "true" (second nillable))
-			 (equal "1" (second nillable)))
-		     (null data))))))
+      ((and elt (null (cdr data)) (xmp-nillable-p conn elt attr)))
       ((and elt (or cdi (xmp-any-cpart conn exel)))
        (cond ((if cdi (xmp-test-complex-def conn cdi elt) t)
 
@@ -826,6 +810,27 @@
 
   )
 
+(defmethod xmp-nillable-p ((conn xmp-connector) elt attr &aux strict)
+  (and attr
+       (case (xmp-nillable conn)
+	 (:accept t)
+	 (:ignore nil)
+	 (:strict
+	  (setf strict t)
+	  (when elt
+	    (xmp-lookup *defined-xmp-elements* elt elt nil :attribute :nillable))))
+       ;; [bug15528] 
+       (do ((tl attr (cddr tl)))
+	   ((atom tl) nil)
+	 (when (or (eq (first tl)
+		       (intern "nil" :net.xmp.schema-instance))
+		   (and (not strict)
+			(equal "nil" (string (first tl)))))
+	   (return (or (equalp "true" (second tl))
+		       (equal "1" (second tl))
+		       (eql 1 (second tl)))	
+		   )))))
+
 
 (defmethod xmp-element-parts ((conn xmp-connector) elt &aux attr)
   (when (consp elt)
@@ -841,7 +846,12 @@
   ;;  call to xmp-begin-element and xmp-end-element
   (multiple-value-bind (vals types)
       (xmp-decode-body conn (cdr data) :attributes attributes)
-    (xmp-complex-content conn elt vals :types types :attributes attributes)))
+
+    ;; If vals is nil, check again for nillable element 
+    ;;  skip call to xmp-complex-content if element is truly ignored
+    (if (and (null vals) (xmp-nillable-p conn elt attributes))
+	(values)
+      (xmp-complex-content conn elt vals :types types :attributes attributes))))
 
 (defmethod xmp-any-type ((conn t) &optional (type nil t-p))
   (if t-p

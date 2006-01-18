@@ -1,3 +1,16 @@
+2006-01-18    <mm@PROA>
+
+	* build.cl (filenames): set patch level to 1 for 8.0 and 4 for 7.0
+	             revise building of combined fasl
+	* soap.cl ("soap"): set patch level to 1 for 8.0 and 4 for 7.0
+	* xmp-soap.cl (soap-encode-parts): one more case for anyType
+	* xmp-test.cl (xmeth-def): update Xmethods namespaces
+	* xmp-base.cl (xmp-nillable-p): new function to test for nillable elt
+	             (xmp-decode-body): call xmp-nillable-p
+		  (xmp-decode-element): do not call xmp-complex-content for
+	                      ignored nillable elements
+	* xmp-test.cl: add run5 - nillable tests
+
 2006-01-09    <mm@PROA>
 
 	* build.cl (filenames): set patch level=3 for 7.0
@@ -421,4 +434,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.13 $
+$Revision: 2.14 $

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.10 2005/12/08 21:10:51 layer Exp $
+;; $Id: xmp-soap.cl,v 2.11 2006/01/18 21:07:23 mm Exp $
 
 ;; SOAP support
 
@@ -911,19 +911,31 @@
 			(:any
 			 (when parts 
 			   (setf arg t)
-			   (cond ((atom parts)   ;;; [bug15783]
-				  (xmp-encode conn parts 'enc:|string|)
-				  (setf parts nil))
-				 (t 
-				  (multiple-value-bind (type-def name)
-				      (soap-find-element conn (first parts) :out)
-				    (if type-def
-					(soap-encode-element
-					 conn name (second parts) :name name)
-				      (soap-encode-element
-				       conn name (second parts) :name name
-				       :type 'enc:|string|)))
-				  (setf parts (cddr parts)))))
+			   (typecase parts
+			     (xmp-element (xmp-encode conn parts nil)
+					  (setf parts nil))
+			     (atom  ;;; [bug15783]
+			      (xmp-encode conn parts 'enc:|string|)
+			      (setf parts nil))
+			     (otherwise
+			      ;; a list may be an alternating list of
+			      ;; (elt-name content elt-name...)
+			      (multiple-value-bind (type-def name)
+				  (soap-find-element conn (first parts) :out)
+				(cond
+				 ((and name type-def)
+				  (soap-encode-element
+				   conn name (second parts) :name name)
+				  (setf parts (cddr parts)))
+				 (name
+				  (soap-encode-element
+				   conn name (second parts) :name name
+				   :type 'xsd:|string|)
+				  (setf parts (cddr parts)))
+				 (t (error
+				     "Cannot encode a random list as xsd:anyType ~S"
+				     parts))))))
+			   )
 			 (values (or name :any) arg))
 			(:element
 			 (cond
