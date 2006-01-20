@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.10 2006/01/18 21:07:23 mm Exp $
+;; $Id: xmp-test.cl,v 2.11 2006/01/20 00:40:47 mm Exp $
 
 ;; Internal-use test cases
 
@@ -590,12 +590,21 @@ Individual tests:
     (values result server-instance client-instance)))
 
 
+(defmacro show-error ((verbose tag) &rest body &aux (v (gensym)) (e (gensym)))
+  `(multiple-value-bind (,v ,e)
+       (ignore-errors 
+	 (multiple-value-list (progn ,@body)))
+     (cond (,e (when ,verbose
+		 (format t "~&;show-error ~A: ~S~%; ~A~%" ,tag ,e ,e))
+	      (error ,e))
+	   (t (values-list ,v)))))
+
 
 ;; Test nillable elements and options [bug15971]
 (defun soap-method-5 (&rest args)
 	 (list 'ss1::result
 	       (format nil "~S" args)))
-
+(defvar *run5verbose* nil)
 (defvar *run5-attrs* nil)
 (defun run5-attrs (conn elt)
   (declare (ignore conn elt))
@@ -603,13 +612,20 @@ Individual tests:
 
 (defun run5-defs (&key nillable)
   (define-namespace :ss1 "ss1" "urn:SS1NS")
-  (when nillable 
-    (define-soap-element nil :|elt2| '(:complex (:seq* :any))
-      :nillable t))
-  (define-soap-element nil
-    'ss1::soap-method-5
-    '(:complex (:seq (:element :|elt1| xsd:|string|))
-	       :action "uri:method5"))	       
+  (case nillable 
+    (:strict (define-soap-element nil :|elt2| '(:complex (:seq* :any))
+	       :nillable t)))
+  (case nillable
+    (:ignore   (define-soap-element nil
+		 'ss1::soap-method-5
+		 '(:complex (:seq (:element :|elt1| xsd:|string|)
+				  (:element :|elt2| xsd:|string|)
+				  )
+			    :action "uri:method5")))
+    (otherwise (define-soap-element nil
+		 'ss1::soap-method-5
+		 '(:complex (:seq (:element :|elt1| xsd:|string|))
+			    :action "uri:method5"))))	       
   (define-soap-element nil 'ss1::soap-result-5 
     '(:complex (:seq (:element ss1::result (:simple xsd:|string|))))))
 
@@ -619,7 +635,56 @@ Individual tests:
 			   :action "uri:method5"
 			   :lisp-name 'soap-method-5))
 
+(defun run5-export-ignore (server)
+       (soap-export-method server 'ss1::soap-method-5 '(:|elt1| :|elt2|)
+			   :return 'ss1::soap-result-5
+			   :action "uri:method5"
+			   :lisp-name 'soap-method-5))
+
 (defun run5-accept (client
+		    &aux
+		    (edef '(:element
+			    ss1::soap-method-5
+			    ;; We need a definition of this element local to the
+			    ;; client call because the client must send an element
+			    ;; that is not even listed in the server definition.
+			    (:complex
+			     (:seq (:element :|elt1| xsd:|string|)
+				   (:element
+				    :|elt2|
+				    (:simple xsd:|string|
+					     :computed-attributes run5-attrs)))
+			     :action "uri:method5"
+			     )))
+		    )  
+  (flet ((result (attr str &rest args)
+		 (let ((*run5-attrs* `(xsi:|nil| ,attr)))
+		   (test
+		    (format nil "(~S ~S)" ':|elt1| str)
+		    (soap-result-string client
+					(apply 'call-soap-method 
+					       client edef args)
+					'ss1::soap-result-5 'ss1::result)
+		    :test #'equal)))
+	 (erret (attr &rest args)
+		(let ((*run5-attrs* `(xsi:|nil| ,attr)))
+		  (test-error
+		   (show-error (*run5verbose* (list "run5-accept" attr))
+		    (apply 'call-soap-method client edef args))
+		   :condition-type 'net.xmp.soap::soap-client-fault
+		   )))
+	 )
+
+    (and (result "true" "str1" :|elt1| "str1" :|elt2| nil)
+	 (result "true" "str2" :|elt2| nil :|elt1| "str2")
+	 (result "1" "str3" :|elt1| "str3" :|elt2| nil)
+	 (result "1" "str4" :|elt2| nil :|elt1| "str4")
+	 (erret "false" :|elt1| "str5" :|elt2| nil)
+	 (erret "0" :|elt1| "str6" :|elt2| nil)
+	  )))
+
+
+(defun run5-strict (client
 		    &aux
 		    (edef '(:element
 			    ss1::soap-method-5
@@ -644,8 +709,8 @@ Individual tests:
 	 (erret (attr &rest args)
 		(let ((*run5-attrs* `(xsi:|nil| ,attr)))
 		  (test-error
-		   (apply 'call-soap-method 
-			  client edef args)
+		   (show-error (*run5verbose* (list "run5-strict" attr))
+		    (apply 'call-soap-method client edef args))
 		   :condition-type 'net.xmp.soap::soap-client-fault
 		   )))
 	 )
@@ -656,33 +721,97 @@ Individual tests:
 	 (result "1" "str4" :|elt2| nil :|elt1| "str4")
 	 (erret "false" :|elt1| "str5" :|elt2| nil)
 	 (erret "0" :|elt1| "str6" :|elt2| nil)
+	 (erret "true" :|elt1| "str6" :|elt2| "s7")  ;;; not empty
+	  )))
+
+(defun run5-strict-b (client
+		      &aux
+		      (edef '(:element
+			      ss1::soap-method-5
+			      (:complex (:seq (:element :|elt1| xsd:|string|)
+					      (:element
+					       :|elt2|
+					       (:simple xsd:|string|
+							:computed-attributes run5-attrs))
+					      )
+				      :action "uri:method5"
+				      )))
+		      )  
+  (flet ((erret (attr &rest args)
+		(let ((*run5-attrs* `(xsi:|nil| ,attr)))
+		  (test-error
+		   (show-error (*run5verbose* (list "run5-strict-b" attr))
+		    (apply 'call-soap-method client edef args))
+		   :condition-type 'net.xmp.soap::soap-client-fault
+		   ))))
+
+    (and (erret "true" :|elt1| "str5" :|elt2| nil)
+	 (erret "false" :|elt1| "str5" :|elt2| nil)
+	 (erret "true" :|elt1| "str6" :|elt2| "s7")  ;;; not empty
+	  )))
+
+(defun run5-ignore (client
+		    &aux
+		    (edef '(:element
+			    ss1::soap-method-5
+			    (:complex (:seq (:element :|elt1| xsd:|string|)
+					    (:element
+					     :|elt2|
+					     (:simple xsd:|string|
+						      :computed-attributes run5-attrs))
+					    )
+				      :action "uri:method5"
+				      )))
+		    )  
+  (flet ((result (attr &rest args)
+		 (let ((*run5-attrs* `(xsi:|nil| ,attr)))
+		   (test
+		    (format nil "~S" args)
+		    (soap-result-string client
+					(apply 'call-soap-method 
+					       client edef args)
+					'ss1::soap-result-5 'ss1::result)
+		    :test #'equal)))
+	 )
+
+    (and (result "true" :|elt1| "str1" :|elt2| nil)
+	 (result "false" :|elt1| "str1" :|elt2| nil)
+	 (result "1" :|elt1| "str3" :|elt2| nil)
+	 (result "0" :|elt1| "str3" :|elt2| nil)
 	  )))
 
 
-(defun run5 (&key debug)
-  (and (run5a :debug debug :new t)
-       (run5b :debug debug :new t)
-       (run5c :debug debug :new t)))
+(defun run5 (&key debug verbose &aux (*run5verbose* verbose))
+  (and (run5b :debug debug :new t)
+       (run5b-b :debug debug :new t)
+       (run5c :debug debug :new t)
+       (run5d :debug debug :new t)
+       (run5e :debug debug :new t)
+       ))
 
-(defun run5a (&key debug new)
-  ;; default setting of client/server nillable (ie :accept)
-  (soap-test-run
-   :new new :debug debug
-   :define #'(lambda () (run5-defs))
-   :export #'run5-export
-   :call #'run5-accept 
-   :dns '(nil (:ss1))
-   ))
+
 
 (defun run5b (&key debug new)
   ;; :strict setting
   (soap-test-run
    :new new :debug debug
-   :define #'(lambda () (run5-defs :nillable t))
+   :define #'(lambda () (run5-defs :nillable :strict))
    :export #'run5-export
    :client '(:nillable :strict)
    :server '(:nillable :strict)
-   :call #'run5-accept 
+   :call #'run5-strict 
+   :dns '(nil (:ss1))
+   ))
+
+(defun run5b-b (&key debug new)
+  ;; :strict setting but not declared
+  (soap-test-run
+   :new new :debug debug
+   :define #'(lambda () (run5-defs))
+   :export #'run5-export
+   :client '(:nillable :strict)
+   :server '(:nillable :strict)
+   :call  #'run5-strict-b
    :dns '(nil (:ss1))
    ))
 
@@ -698,9 +827,27 @@ Individual tests:
    :dns '(nil (:ss1))
    ))
 
+(defun run5d (&key debug new)
+  ;; explicit :ignore setting
+  (soap-test-run
+   :new new :debug debug
+   :define #'(lambda () (run5-defs :nillable :ignore))
+   :export #'run5-export-ignore
+   :client '(:nillable :ignore)
+   :server '(:nillable :ignore)
+   :call  #'run5-ignore
+   :dns '(nil (:ss1))
+   ))
 
-
-
+(defun run5e (&key debug new)
+  ;; default :ignore setting
+  (soap-test-run
+   :new new :debug debug
+   :define #'(lambda () (run5-defs :nillable :ignore))
+   :export #'run5-export-ignore
+   :call  #'run5-ignore
+   :dns '(nil (:ss1))
+   ))
 
 
 

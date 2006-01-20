@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.10 2006/01/18 21:07:23 mm Exp $
+;; $Id: xmp-base.cl,v 2.11 2006/01/20 00:40:47 mm Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -460,7 +460,9 @@
 		      ;;  :ignore    -> ignore nillable and nil attributes
 		      ;;  :strict    -> must be declared in element def
 		      ;;  :accept    -> do not look for declaration
-		      :initarg :nillable :initform :accept)
+		      :initarg :nillable
+		      :initform :ignore ;;; for compatibility with older versions
+		      )
     (xml-syntax       :accessor xmp-xml-syntax
 		      ;;   nil   -> :seq? is :set*, :maybe spliced in
 		      ;; :strict -> :seq? is :seq, :maybe ignored
@@ -844,13 +846,13 @@
 			       &rest options &key attributes &allow-other-keys)
   ;; this method is to allow specialized context handling between
   ;;  call to xmp-begin-element and xmp-end-element
-  (multiple-value-bind (vals types)
-      (xmp-decode-body conn (cdr data) :attributes attributes)
-
-    ;; If vals is nil, check again for nillable element 
-    ;;  skip call to xmp-complex-content if element is truly ignored
-    (if (and (null vals) (xmp-nillable-p conn elt attributes))
-	(values)
+  
+  ;; If contents is nil, check for nillable element 
+  ;;  skip call if element is truly ignored
+  (if (and (null (cdr data)) (xmp-nillable-p conn elt attributes))
+      (values)
+    (multiple-value-bind (vals types)
+	(xmp-decode-body conn (cdr data) :attributes attributes)
       (xmp-complex-content conn elt vals :types types :attributes attributes))))
 
 (defmethod xmp-any-type ((conn t) &optional (type nil t-p))

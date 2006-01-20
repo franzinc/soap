@@ -1,3 +1,9 @@
+2006-01-19    <mm@PROA>
+
+	* xmp-test.cl (run5): refined nillable tests
+	* xmp-base.cl (xmp-decode-element): check for nillable before calling decode-body
+	             (nillable initarg): set to :ignore for compatibility with old code 
+	
 2006-01-18    <mm@PROA>
 
 	* build.cl (filenames): set patch level to 1 for 8.0 and 4 for 7.0
@@ -434,4 +440,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.14 $
+$Revision: 2.15 $
