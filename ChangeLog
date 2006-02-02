@@ -1,3 +1,7 @@
+2006-02-02  Kevin Layer  <layer@gemini>
+
+	* Makefile: tweaks for patch building
+
 2006-01-19    <mm@PROA>
 
 	* xmp-test.cl (run5): refined nillable tests
@@ -440,4 +444,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.15 $
+$Revision: 2.16 $

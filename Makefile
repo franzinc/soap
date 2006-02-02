@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.2 2005/08/03 05:09:48 layer Exp $
+# $Id: Makefile,v 2.3 2006/02/02 18:12:09 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -15,8 +15,6 @@ alisp = ../lisp $(run_lisp_args) $(windows_args) \
 	-I adcl $(unix_args) -d builda.out -batch -q
 
 all: clean compile DIST
-
-patch: clean compile patch-dist
 
 compile: FORCE
 	rm -f build.tmp
@@ -43,8 +41,17 @@ DIST: FORCE
 	cp -p soapex.cl DIST/examples/soap
 	cp -p soapval1.cl DIST/examples/soap
 
-## 7.0 patch version 001:
-patch-dist.001: FORCE
+# Latest 7.0 patch:
+DIST.004: clean compile
+	rm -fr DIST DIST.src
+	mkdir DIST \
+	      DIST/code
+	cp -p soap.fasl DIST/code/soap.004
+	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.004
+	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.004
+
+# Latest 8.0 patch:
+DIST.001: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
@@ -53,7 +60,7 @@ patch-dist.001: FORCE
 	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.001
 
 ## 7.0 patch version 002:
-patch-dist: FORCE
+old-patch-dist: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST DIST/code DIST/examples DIST/examples/soap
 	cp -p soap.fasl DIST/code/soap.002
