@@ -1,3 +1,8 @@
+2006-06-22  Kevin Layer  <layer@gemini>
+
+	* Makefile: bug16292: make sure bignum-server.cl gets into
+	  distribution
+
 2006-02-02  Kevin Layer  <layer@gemini>
 
 	* Makefile: tweaks for patch building
@@ -444,4 +449,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.16 $
+$Revision: 2.17 $

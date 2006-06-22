@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.4 2006/02/02 18:28:33 layer Exp $
+# $Id: Makefile,v 2.5 2006/06/22 13:39:12 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -40,6 +40,7 @@ DIST: FORCE
 	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.fasl
 	cp -p soapex.cl DIST/examples/soap
 	cp -p soapval1.cl DIST/examples/soap
+	cp -p bignum-server.cl DIST/examples/soap
 
 # Latest 7.0 patch:
 soap.004: clean compile
