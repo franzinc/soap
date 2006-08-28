@@ -1,3 +1,105 @@
+
+2006-08-28    <mm@PROA>
+
+	* RELNOTES: add entries for patches soap.002(8.0)  soap.005(7.0)
+	* xmp-wsdl.cl (encode-wsdl-file): make sure that message elements are in 
+	          package associated with targetNamespace
+	* build.cl (filenames): modify to default to single fasl file
+	* xmp-wsdl.cl: replaced all :|| symbols with xmp-symbol calls
+	     (wsdl-lookup-type): add loose lookup for type attribute
+	* xmp-soap.cl: replaced all :|| symbols with xmp-symbol calls
+	* xmp-schema.cl: replaced all :|| symbols with xmp-symbol calls
+	* xmp-base.cl (xmp-symbol): new macro to allow fixed-case symbols in
+	                       case-portable fasl files
+	* xmp-wsdl.cl (wsdl-make-tname): emit name qualified to target namespace
+	                                 when generating wsdl file
+	* xmp-base.cl (xmp-defined-element-def): follow named type to def
+	* xmp-soap.cl (soap-encode-element): add :nilled-or-default :nilled-or-empty 
+	                                     :nilled-or-none options
+	* xmp-base.cl (xmp-decode-body): make sure empty element gets passed to 
+	                            xmp-simple-content (for empty-element handling)
+	* xmp-soap.cl (xmp-server-implementation): use modified parameters 
+	                                   returned by xmp-accept-method [bug16269]
+	   (def-soap-simple-content enc:|string|): default for empty element is ""
+	* build.cl (filenames): update patch level
+	* soap.cl ("soap"): update patch level
+	* xmp-soap.cl (call-soap-method): aleas return two values
+	* xmp-wsdl.cl (decode-wsdl-source): add import argument
+	* xmp-wsdl.cl (wsdl-bind-operation): generate list for lisp-name in exports
+                                            [bug16269]
+	* xmp-base.cl (xmp-accept-method): remap arglist if lisp-name is a list
+	                                   [bug16269]
+	* xmp-soap.cl (xmp-signature-equal): review and revise comparison
+	* xmp-wsdl.cl (xmp-begin-element): parse and insert included file
+	* xmp-base.cl (xmp-copy): add destination argument
+	* xmp-soap.cl (soap-encode-element): look for options on top-level name first
+	* xmp-base.cl (xmp-getf-in-def): look for attributes on named types as well
+	* xmp-soap.cl (soap-resolve-type): continue past atomic def
+	* xmp-soap.cl(xmp-begin-element): revise error messages
+	* xmp-base.cl (define-xmp-element): store any attributes in def 
+	         (xmp-lookup): look for attributes on type def as well
+		 (define-xmp-type): store any attributes in def 
+		 (xmp-defined-element-def): split out xmp-defined-array-def
+	* xmp-soap.cl (soap-encode-element): look for null-element=:none
+	* xmp-soap.cl: add default value for all numeric fields [bug16260]
+	     (xmp-encode): delete the (incorrect) :around method [bug16259]
+	              empty element is sent from soap-encode-element
+	* xmp-base.cl (xmp-prefix-to-package): Never search for a prefix
+	                           outside the context of XML document
+	* xmp-wsdl.cl (decode-wsdl-namespaces): revised output layout
+	* build.cl: put provide calls in soapa and soapm files
+	* xmp-schema.cl (schema-component-to-collector): add group recognizer
+	     (schema-lookup-base): lookup definition of base type
+	            if xmp-xml-syntax is not :strict, try in target namespace
+		       and in default namespace
+		       (schema-decode-attribute): may return 2n values
+	* xmp-wsdl.cl (wsdl-define-type): map xsd:union to xsd:string
+	* xmp-schema.cl (schema-component): add schema-source slot
+	       (schema-component-to-cpart): expand group refs [bug16201]
+	* xmp-wsdl.cl (wsdl-export-symbol): do not export from keyword package
+ 	              (wsdl-compose-parts): detect conflicts earlier
+		      (wsdl-compose-name): always makes exported symbol
+		      (wsdl-print-env): try to control package and case in output
+		      (wsdl-encoder): omit prefix if object-access=:object-class
+	* xmp-wsdl.cl (wsdl-bind-operation): add suffix=:compose option
+	* xmp-soap.cl (xmp-call-method): skip the call to xmp-decode-message
+	                                 when debug=:stop [bug16004]
+	* xmp-wsdl.cl (wsdl-emit-wrapper): add check-type calls for some t specializers
+	* xmp-soap.cl (def-soap-simple-content): add check-type option
+	* xmp-base.cl (encode-base64-string): accept also array (of integers)
+	              (decode-base64-string): always return (array (signed-byte 8))
+	* xmp-wsdl.cl (wsdl-compose-part): add :capitalize strategy
+	* xmp-soap.cl (soap-encode-element): send nil attribute with nillable empty elt
+	* xmp-wsdl.cl (wsdl-accessor): intern all accessors in the same package
+	* xmp-wsdl.cl (wsdl-constructor): use new :object-access option
+	            (wsdl-make-symbol): add export kw arg
+		    (wsdl-walk-form): export top-level defining symbols
+		    (wsdl-make-interface): add exports to defpackage forms
+		    (defpackage :net.xmp.wsdl): export soap-array-mixin
+	* xmp-wsdl.cl (wsdl-emit-wrappers): interact with :response option
+	    (wsdl-make-interface): always call wsdl-compose-name with keyword
+	                  constants instead of strings for better case selection
+	     (qt): look for already quoted 
+	     (wsdl-make-symbol): make sure from is always string(s)
+	     (wsdl-emit-wrapper): use different names for overloaded message methods
+	     (wsdl-emit-wrapper): always ignore top-level element name in reply
+	     (wsdl-do-element):  Try to use the message name as an alternate name
+	* xmp-wsdl.cl (decode-wsdl-source): save source of wsdl in instance
+	      (wsdl-make-interface): print source info in outfile [rfe6554]
+	* xmp-wsdl.cl (wsdl-make-interface): add redef keyword
+	                    determine output files early
+		(wsdl-query-redef): new function to enforce redef option
+		(wsdl-walk-form): was failing to keep list of all names
+		(wsdl-make-interface): print warning if conflicts
+		(wdsl-make-name): new function to centralize interning of symbols
+	* xmp-wsdl.cl (wsdl-index-form): call wsdl-generate-code for each top-level
+	                                 form [rfe6553]
+		  (wsdl-make-interface): add response arg [rfe6555]
+		  (wsdl-resolve-type): cope with simple sef by name
+		  (break-at-case-shifts): was returning nil if empty string arg
+	* soap.cl: do not use #+(version= 6)   must use version>=
+	* build.cl: do not use #+(version= 6)   must use version>=
+
 2006-06-22  Kevin Layer  <layer@gemini>
 
 	* Makefile: bug16292: make sure bignum-server.cl gets into
@@ -449,4 +551,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.17 $
+$Revision: 2.18 $

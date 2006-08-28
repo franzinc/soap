@@ -1,8 +1,41 @@
 
-;; $Id: build.cl,v 2.7 2006/01/18 21:07:23 mm Exp $ 
+;; $Id: build.cl,v 2.8 2006/08/28 20:27:03 mm Exp $ 
 
 (in-package :user)
 
+#-soap-two-fasls
+(let* ((filenames (list "xmp-base"
+			"xmp-aserve"
+			"xmp-schema"
+			"xmp-soap"
+			"xmp-wsdl"
+			)))
+
+  (dolist (f filenames) (load (compile-file (concatenate 'string f ".cl"))))
+  (compile-file "soap.cl")
+  (with-open-file
+   (out "soap.fasl"
+	;;:element-type '(unsigned-byte 8)
+	:direction :output 
+	:if-exists :append
+	:if-does-not-exist :error)
+   (dolist (file filenames)
+     (with-open-file 
+      (in (concatenate 'string file ".fasl")
+	  ;;:element-type '(unsigned-byte 8)
+	  )
+      (format t "~%; ~s" file)
+      (let ((buf (make-array 2048 :element-type '(unsigned-byte 8))))
+	(loop as x = (read-sequence buf in)
+	      until (= x 0)
+	      do (write-sequence buf out :end x)))))))
+
+
+
+
+;;; This is the old way of building the SOAP module with two
+;;; separate fasl files - one for Modern ACL and one for ANSI.
+#+soap-two-fasls
 (let* ((filenames (list "xmp-base"
 			"xmp-aserve"
 			"xmp-schema"
@@ -12,6 +45,7 @@
        (soap (ecase *current-case-mode*
 	       (:case-sensitive-lower "soapm")
 	       (:case-insensitive-upper "soapa")))
+       (key (read-from-string (format nil ":~A " soap)))
        (soap-cl (format nil "~a.cl" soap))
        (soap-fasl (format nil "~a.fasl" soap)))
 
@@ -37,12 +71,14 @@
 				 :post-loadable t)
 		  out)))	       
 
-     #+(version= 8 0) (patch-level 1)
-     #+(version= 7 0) (patch-level 4)
-     #+(version= 6 2) (patch-level 5)
+     ;; Patch level # must be updated consistently in soap.cl and Makefile.
+     #+(version= 8 0) (patch-level 2)
+     #+(version= 7 0) (patch-level 5)
+     #+(and (version>= 6 2) (not (version>= 7))) (patch-level 5)
      
      )
-
+   (print (list 'provide key) out)
+   (print '(provide :soap) out)
    (terpri out))
   (compile-file soap-cl)
   

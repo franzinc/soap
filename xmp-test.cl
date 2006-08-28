@@ -17,46 +17,11 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.11 2006/01/20 00:40:47 mm Exp $
+;; $Id: xmp-test.cl,v 2.12 2006/08/28 20:27:09 mm Exp $
 
 ;; Internal-use test cases
 
 (in-package :user)
-
-(eval-when (compile load eval)
-
-  (let* ((module (ecase *current-case-mode*
-		   (:case-sensitive-lower :soapm)
-		   (:case-insensitive-upper :soapa)))
-	 (file (string-downcase (format nil "~A.fasl"  module))))
-    (or (member :soap *modules* :test #'string-equal)
-	(when (probe-file file)
-	  (load file)
-	  (provide module)
-	  (provide :soap)))
-    (require :soap)
-    (require :tester)
-    )
-  )
-
-(eval-when (compile load eval)
-  ;; always compile these to avoid casemode problems
-  (load (compile-file "xmp-mtest.cl"))
-  (load (compile-file "soapex.cl"))
-  (load (compile-file "soapval1.cl"))
-  (load (compile-file "bignum-server.cl"))
-  )
-
-(defpackage :user (:use :net.xmp.soap  :util.test)) 
-
-(defpackage :net.xmp.schema (:use) (:nicknames :xs :xsd))
-(defpackage :net.xmp.schema-instance (:use) (:nicknames :xsi))
-(defpackage :net.xmp.soap.none (:use) (:nicknames :none))
-(defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
-(defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
-
-(defpackage :temp (:use))
-(defpackage :gg (:use))
 
 #|
 
@@ -68,10 +33,15 @@
 (test-soap-remote) --> test report from with-tests wrapper
                        (soap-remote-tests)  - just the tests
 
+;; :cd xmethods-test-folder
 (test-soap-x [remote]) -> test report  (parse all WSDL at XMethods.com)
 
 
+
 Individual tests:
+
+;; Assumes ./xmp-test folder is visible
+(soap-files-tests)
 
 - From soapex.cl and soapval1.cl -
 (test-clients) --> t   ;; some clients may not respond
@@ -121,41 +91,125 @@ Individual tests:
 |#
 
 
-(defun test-soap-local (&aux r)
+(eval-when (compile load eval) (require :tester))
+(defpackage :user (:use :util.test)) 
+
+(eval-when (compile load eval)
+
+  #-soap-two-fasls
+  (or (member :soap *modules* :test #'string-equal)
+      (when (probe-file "soap.fasl") (load "soap.fasl")))
+	     
+  #+soap-two-fasls
+  (let* ((module (ecase *current-case-mode*
+		   (:case-sensitive-lower :soapm)
+		   (:case-insensitive-upper :soapa)))
+	 (file (string-downcase (format nil "~A.fasl"  module))))
+    (or (member :soap *modules* :test #'string-equal)
+	(when (probe-file file)
+	  (load file)
+	  (provide module)
+	  (provide :soap))))
+
+  (require :soap)
+  )
+
+(eval-when (compile load eval)
+  ;; always compile these to avoid casemode problems
+  (load (compile-file "xmp-mtest.cl"))
+  (load (compile-file "soapex.cl"))
+  (load (compile-file "soapval1.cl"))
+  )
+
+(defpackage :user (:use :net.xmp.soap)) 
+
+(defpackage :net.xmp.schema (:use) (:nicknames :xs :xsd))
+(defpackage :net.xmp.schema-instance (:use) (:nicknames :xsi))
+(defpackage :net.xmp.soap.none (:use) (:nicknames :none))
+(defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
+(defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
+
+(defpackage :temp (:use))
+(defpackage :gg (:use))
+
+
+
+(defun test-soap-local (&key verbose (files "xmp-test") &aux r)
   (with-tests
    (:name "SOAP module (local)")
    (setf *error-protect-tests* t)
-   (setf r (soap-local-tests)))
+   (setf r (soap-local-tests :verbose verbose :files files)))
   r)
 
-(defun soap-local-tests ()
-  (and 
-   (test nil (null (test-decoder-all)))
-   (test nil (null (xmp-match-tests)))
-   (test nil (null (xmp-break-tests)))
 
-   (test nil (null (ss1 :index :all)))
-   (test nil (null (ss2)))
-   (test :all-ok (test-validator1))
-   (test t (test-bn))
-   (test-no-error (stop-soap-server (symbol-value '*bn-server*)))
-   (run4)
-   (run5)
-   ))
+(defun test-soap-files (&key verbose (folder "xmp-test") &aux r v)
+  (with-tests
+   (:name "SOAP file tests")
+   (setf *error-protect-tests* t)
+   (multiple-value-setq (r v) (soap-files-tests :folder folder :verbose verbose)))
+  (values r v))
 
-(defun test-soap-remote (&aux r)
+(defun soap-files-tests (&key verbose (folder "xmp-test") &aux up r v)
+  (unwind-protect
+      (let ()
+	(tpl:do-command :cd folder)
+	(setf up t)
+	(load (compile-file "xmp-driver"))
+	(multiple-value-setq (r v) (funcall 'xmp-run-test-files :verbose verbose)))
+    (when up 	(tpl:do-command :cd "..")))
+  (values r v))
+
+(defun soap-local-tests (&key verbose (files "xmp-test"))
+  (macrolet ((with-timer
+	      (&rest forms &aux (tag (cond ((null forms) "empty")
+				((consp (first forms)) (caar forms))
+				(t (first forms)))))
+	      `(let ((time (get-universal-time))
+		     (tag ',tag))
+		 (when verbose
+		     (format t "~&;begin ~A" tag))
+		 (unwind-protect (let () ,@forms)
+		   (when verbose
+		     (format t "~&;  end ~A - ~A seconds~%" tag
+			     (ignore-errors (- (get-universal-time) time))))))))
+    (and 
+     (with-timer (test-decoder-all))
+     (with-timer (xmp-match-tests))
+     (with-timer (xmp-break-tests))
+
+     (with-timer "ss1" (test nil (null (ss1 :index :all))))
+     (with-timer "ss2" (test nil (null (ss2))))
+     (with-timer (load (compile-file "soapval1.cl")))
+     (with-timer "validator1" (test :all-ok (test-validator1)))
+     (with-timer (run4))
+     (with-timer (run5))
+     (with-timer (ts1001))
+     (with-timer (ts1002))
+     (with-timer (ts1003))
+     (with-timer "soap-files-tests" 
+		 (if files
+		     (soap-files-tests :verbose verbose :folder files)
+		   t))
+     ;; do this one after soap-files-tests to avoid package pollution
+     (with-timer "test-bn" (test t (test-bn)))
+     (with-timer "stop-soap-serve" 
+		 (test-no-error (stop-soap-server (symbol-value '*bn-server*))))
+     )))
+
+(defun test-soap-remote (&key (timeout 60) &aux r)
   (with-tests
    (:name "SOAP module (external servers)")
    (setf *error-protect-tests* t)
-   (setf r (soap-remote-tests)))
+   (setf r (soap-remote-tests :timeout timeout)))
   r)
 
-(defun soap-remote-tests ()
+(defun soap-remote-tests (&key (timeout 60))
   (load (compile-file "soapex.cl")) ;; to make sure namespaces are defined
-  (test nil (null (test-clients)))
+  (test nil (null (test-clients :timeout timeout)))
   )
 
 (defun test-soap-x (&optional remote &aux r)
+  (xmeth-folder)
   (if remote 
       (with-tests 
        (:name "Xmethods (fetch external WSDL)")
@@ -183,8 +237,8 @@ Individual tests:
 
 (defun test-bn ()
   (load (compile-file "bignum-server.cl"))
-  (let* ((server (start-server))
-	(r (try-server))
+  (let* ((server (funcall 'start-server))
+	(r (funcall 'try-server))
 	(v (and (equal (format nil "~A" (apply 'factorial 17 0 nil))
 		(soap-result-only nil (elt r 0) nil "calculateResponse" "calcResult"))
 	 (equal "18"
@@ -315,8 +369,7 @@ Individual tests:
 				      :publish `(:path ,path)
 				      :lisp-package :keyword
 				      :message-dns '(nil (:ss1))
-				      :soap-debug
-				      (case debug ((:client nil) nil) (otherwise t))
+				      :soap-debug (ts-debug :server debug)
 				      :url url
 				      )))
 
@@ -361,10 +414,7 @@ Individual tests:
 	  (let* ((client (soap-message-client :url url
 					      :lisp-package :keyword
 					      :message-dns '(nil (:ss1))
-					      :soap-debug
-					      (case debug
-						((:server nil) nil)
-						(otherwise t))
+					      :soap-debug (ts-debug :client debug)
 					      ))
 		 (result
 		  (and  (one client index 0 111 222 333)
@@ -442,8 +492,7 @@ Individual tests:
 				      :publish `(:path ,path)
 				      :lisp-package :keyword
 				      :message-dns '(nil (:ss1))
-				      :soap-debug
-				      (case debug ((:client nil) nil) (otherwise t))
+				      :soap-debug (ts-debug :server debug)
 				      :url url
 				      )))
     (setf net.aserve::*enable-logging* log)
@@ -462,10 +511,7 @@ Individual tests:
 					      :message-dns '(nil (:ss1))
 					      :message-init
 					      (if extend (list init extend) init)
-					      :soap-debug
-					      (case debug
-						((:server nil) nil)
-						(otherwise t))
+					      :soap-debug (ts-debug :client debug)
 					      ))
 	    (or (eql
 		 length
@@ -564,8 +610,7 @@ Individual tests:
 				 :publish `(:path ,path)
 				 :lisp-package lisp
 				 :message-dns dns
-				 :soap-debug
-				 (case debug ((:client nil) nil) (otherwise t))
+				 :soap-debug (ts-debug :server debug)
 				 server))
 	 (sock (slot-value net.aserve:*wserver* 'net.aserve::socket))
 	 (lport (socket:local-port sock))
@@ -578,10 +623,7 @@ Individual tests:
 	  (setf client-instance (apply #'soap-message-client :url url
 				       :lisp-package lisp
 				       :message-dns dns
-				       :soap-debug
-				       (case debug
-					 ((:server nil) nil)
-					 (otherwise t))
+				       :soap-debug (ts-debug :client debug)
 				       client))
 	  (when call (setf result (funcall call client-instance))))
       (and server-instance stop (stop-soap-server server-instance))
@@ -766,12 +808,12 @@ Individual tests:
   (flet ((result (attr &rest args)
 		 (let ((*run5-attrs* `(xsi:|nil| ,attr)))
 		   (test
-		    (format nil "~S" args)
+		    (format nil "~S" (mapcar #'(lambda (arg) (or arg "")) args))
 		    (soap-result-string client
 					(apply 'call-soap-method 
 					       client edef args)
 					'ss1::soap-result-5 'ss1::result)
-		    :test #'equal)))
+		    :test #'equal :fail-info (list 'run5-ignore attr))))
 	 )
 
     (and (result "true" :|elt1| "str1" :|elt2| nil)
@@ -983,20 +1025,23 @@ Individual tests:
 
 
 
-(defun test-clients (&key index (error-p nil) val-p &aux (fail 0) answer)
+(defun test-clients (&key index (error-p nil) val-p (timeout 60)
+			  &aux (fail 0) answer)
 
   (macrolet ((run-one (this body &optional expected)
 		      `(when (or (null index) (eql index ,this))
-			 (let ((res (if error-p
+			 (let ((res (mp:with-timeout
+				     (timeout :timeout)
+				     (if error-p
 					,body
 				      (multiple-value-bind (v e)
 					  (ignore-errors (multiple-value-list ,body))
 					(if e
 					    (list nil e)
-					  v)))))
-			   (if val-p 
-			       (setf answer res)
-			     (setf res (test-res res ',expected)))
+					  v))))))
+			   (cond (val-p (setf answer res))
+				 ((eq res :timeout))
+				 (t (setf res (test-res res ',expected))))
 			   (format t "~&;;~2D. ~A~%" ,this res)))))
     (flet ((test-res (res ex &aux elt)
 		     (cond ((null (first res))
@@ -1055,7 +1100,6 @@ Individual tests:
 			     (verbose nil)
 			     (error-p t)
 			     &aux fail)
-  (load (compile-file "soapval1.cl"))
   (let ((oldlog net.aserve::*enable-logging*))
     (unwind-protect
 	(let ()
@@ -1065,9 +1109,7 @@ Individual tests:
 		      (setf *server* nil)))
 	  (or *server*
 	      (setf *server* (make-validator1-server :port port
-						     :debug (case debug
-							      ((nil :client) nil)
-							      (otherwise debug)))))
+						     :debug (ts-debug :server debug))))
 	  (macrolet ((run-one (body)
 			      `(when (or (null index) (eql index this))
 				 (dotimes (n reps)
@@ -1086,9 +1128,7 @@ Individual tests:
 					       :lisp-package :keyword
 					       :decode-flag
 					       nil ;;; ignore undefined elts and types
-					       :soap-debug (case debug
-							     ((nil :server) nil)
-							     (otherwise debug))
+					       :soap-debug (ts-debug :client debug)
 					       ))
 		  (this 0))
 
@@ -1378,8 +1418,24 @@ Individual tests:
 (defpackage :tnst (:use))
 
 
+(defun xmeth-folder (&aux all)
+  (or (and (probe-file "xmethods") (file-directory-p "xmethods"))
+      (null (setf all (directory ".")))
+      (let (xm (i 0))
+	(dolist (a all) (when (eql 0 (search "xmeth-" (pathname-name a)))
+			  (push i xm) (incf i)
+			  (push (namestring a) xm)))
+	(setf xm (reverse xm))
+	(cond ((null xm)
+	       (error "Cannot find any xmethods folders"))
+	      (t (format t "~&~{; ~A: ~A~%~}" xm)
+		 (cerror "pick a folder by index" "several xmethods folders")
+		 (format t "~&~{; ~A: ~A~%~}" xm)
+		 (format t "~&;Enter index to above list: ")
+		 (tpl:do-command :cd (elt xm (* 2 (read)))))))))
 
 (defun xmeth-def (&key syntax (source "xmeth.wsdl"))
+  
   (define-namespace-map :xmeth-base
     nil
     '(:tnsw
@@ -1388,28 +1444,47 @@ Individual tests:
     '(:tnst
       "tnst"
       "http://www.xmethods.net/interfaces/query.xsd")
+    `(:tnsx
+      "tnsx"
+      "http://www.xmethods.net/interfaces/query")
     :all
     '(:keyword nil :any))
 
   (define-namespace-map :xmeth-entry nil :all)
-  (let ((w (typecase source
-	     ((member :uri)
-	      (decode-wsdl-at-uri "http://www.xmethods.net/wsdl/query.wsdl"
-				  :namespaces :decode
-				  :xml-syntax syntax 
-				  :base       :xmeth-base))
-	     ((or string pathname)
-	      (decode-wsdl-file source
-				:namespaces :decode
-				:xml-syntax syntax 
-				:base       :xmeth-base)))))
+
+  (let (w)
+    (etypecase source
+      ((member :uri)
+       (when (directory ".") (error "Must start in empty folder."))
+       (multiple-value-bind (def rc)
+	   (net.aserve.client:do-http-request
+	    "http://www.xmethods.net/wsdl/query.wsdl")
+	 (cond ((not (eql 200 rc)) (error "Return ~S from http request." rc))
+	       ((not (stringp def)) (error "Odd return ~S from http request."
+					   def)))
+	 (with-open-file (s "xmeth.wsdl" :direction :output)
+			 (write-line def s)))
+       (make-directory "xmethods")
+       (setf source "xmeth.wsdl"))
+      ((or string pathname) (or (probe-file source) 
+				(error "Not found: ~S" source))))
+    (or (probe-file "xmeth.wsdl") (error "File xmeth.wsdl does not exist."))
+    (cond ((null (probe-file "xmethods"))
+	   (error "sub-directory xmethods not found."))
+	  ((file-directory-p "xmethods"))
+	  (t (error "xmethods is not a sub-directory.")))
+    (setf w (decode-wsdl-file source
+			      :namespaces :decode
+			      :xml-syntax syntax 
+			      :base       :xmeth-base))
     (make-client-interface w 0 "xmeth-client.cl"
+			   :prefix :xmeth-
 			   :suffix :message :verbose t :map :xmeth-ns)
     (load (compile-file-if-needed "xmeth-client.cl"))
     "xmeth-client.cl"))
 
 (defun xmeth-client-call ()
-  (funcall '|client-getAllServiceNames|))
+  (funcall '|xmeth-getAllServiceNames|))
     
 
 (defvar *xmethods* nil )
@@ -1439,9 +1514,11 @@ Individual tests:
 
 
 
-(defvar *errors* nil)
+(defvar *soap-errors* nil)
+(defvar *xml-errors* nil)
 (defvar *ok* 0)
 (defvar *bad* 0)
+(defvar *bad-xml* 0)
 (defun xmeth-errorp (errorp i name body)
   (let* (
 	 (text nil)
@@ -1464,7 +1541,7 @@ Individual tests:
     (if fskip
 	(format t "~& Skip ~A~%" i)
       (unwind-protect
-	  (let (vals err)
+	  (let (vals err xe)
 	    (format t "~&Begin ~A at ~A~%" i (timestamp nil))
 	    (if errorp
 		(setf vals (multiple-value-list (funcall body i)))
@@ -1478,24 +1555,29 @@ Individual tests:
 		 (t
 		  (setf err "with error")
 		  (setf e (format nil "~A" e))
-		  (when (search "[in Sax parser]" e :test 'equalp)
-		    (setf e "SAX parse error"))
+		  (when (or (search "[in Sax parser]" e :test 'equalp)
+			    (search "illegal namestring:" e :test 'equalp)
+			    (search "XML file not found." e :test 'equalp)
+			    )
+		    (setf xe t))
 		  (setf (second ferr) e)
 		  (when (< 80 (length e)) (setf e (subseq e 0 80)))
 		  (format t    "~&~%ERROR ~A~%~A~%" i e)
 		  (when (< 50 (length e)) (setf e (subseq e 0 50)))
-		  (let* ((place (assoc e *errors* :test #'equal)))
+		  (let* ((place (if xe
+				    (assoc e *xml-errors* :test #'equal) 
+				  (assoc e *soap-errors* :test #'equal))))
 		    (if place
 			(incf (second place))
-		      (push (setf place (list e 1)) *errors*))
-		    (cond ((< 12 (length place)))
-			  ((= 12 (length place)) (push :more (cddr place)))
-			  (t (push i (cddr place))))
+		      (if xe
+			  (push (setf place (list e 1)) *xml-errors*)
+		      (push (setf place (list e 1)) *soap-errors*)))
+		    (push i (cddr place))
 		    )
 		  ))
 		(setf vals v)))
 	    (cond (err (setf (cdr fres) :error)
-		       (incf *bad*))
+		       (if xe (incf *bad-xml*) (incf *bad*)))
 		  (t   (setf (cdr fres) :ok)
 		       (incf *ok*)))
 	    (format t "~&  End ~A ~A~%" i (or err "ok"))
@@ -1503,18 +1585,64 @@ Individual tests:
 	(when text (close text))
 	))))
 
-(defun xmeth-one-remote (&key (i 0) errorp syntax (folder "xmethods"))
+
+(defvar *xmeth-remote-external* nil)
+(defmethod net.xml.sax:compute-external-address
+  :around ((parser t) (system t) (public t) (current-filename t))
+  (multiple-value-bind (v e w)
+      (ignore-errors (let ((v (call-next-method))) v))
+    (cond ((and (null e) v (ignore-errors (setf w (probe-file v)))) w)
+	  ((atom *xmeth-remote-external*) (when e (error e)))
+	  ((eq :remote (first *xmeth-remote-external*))
+	   (xmeth-remote-external nil (or w system) (second *xmeth-remote-external*)
+				  (third *xmeth-remote-external*)))
+	  (t (xmeth-local-external nil (or w system) (second *xmeth-remote-external*)
+				  (third *xmeth-remote-external*))))))
+		  
+
+(defun xmeth-remote-external (conn url root index)
+  (declare (ignore conn))
+  (let* ((string (net.aserve.client:do-http-request url))
+	 (out (format nil "~A~A.dtd" root (prog1 (first index) (incf (first index)))))
+	 )
+    (when string
+      (with-open-file (s out :direction :output :if-exists :supersede)
+		      (write-line string s))
+      (probe-file out))))
+
+(defun xmeth-local-external (conn url root index)
+  (declare (ignore conn url))
+  (probe-file (format nil "~A~A.dtd" root (prog1 (first index) (incf (first index))))))
+
+(defun xmeth-remote-insert (conn url root index)
+  (declare (ignore conn))
+  (let* ((string (net.aserve.client:do-http-request url))
+	 (out (format nil "~A~A.xml" root (prog1 (first index) (incf (first index)))))
+	 )
+    (when string
+      (with-open-file (s out :direction :output :if-exists :supersede)
+		      (write-line string s))
+      string)))
+
+(defun xmeth-local-insert (conn url root index)
+  (declare (ignore conn url))
+  (let* ((in (format nil "~A~A.xml" root (prog1 (first index) (incf (first index)))))
+	 )
+    (ignore-errors (file-contents in))))
+
+(defun xmeth-one-remote (&key (i 0) errorp syntax (folder "xmethods") (out "xmout"))
   ;; fetch WSDL from URL
   (let* ((name (read-from-string (format nil ":xmeth~3,'0D" i))))
     (xmeth-errorp
      errorp i (format nil "~A/~A.txt" folder name)
      #'(lambda (i)
 	 (let* ((id (soap-result-part nil (elt *xmethods* i) :|id|))
-		(res (funcall '|client-getServiceDetail| :id id))
+		(res (funcall '|xmeth-getServiceDetail| :id id))
 		(def (soap-result-only nil res :error "getServiceDetailResponse" nil))
 		(wsdl-url (soap-result-part nil def "wsdlURL"))
 		(string (net.aserve.client:do-http-request wsdl-url))
-		)
+		(*xmeth-remote-external* (list :remote))
+		nb)
 	   (if string
 	       (with-open-file (s (format nil "~A/~A.xml" folder name)
 				  :direction :output
@@ -1522,22 +1650,44 @@ Individual tests:
 			       (write-line string s))
 	     (error "URL ~A returns nil."  wsdl-url))
 	   (or (and (< 20 (length string))
-		    (let ((nb (position #\space string :test-not #'eql)))
-		      (string-equal "<?xml " string :start2 nb :end2 (+ nb 6))))
-	       (error "Reply is not XML"))
-	   (xmeth-body i folder name syntax)
+		    (string-equal
+		     "<?xml " string
+		     :start2 (setf nb (position #\space string :test-not #'eql))
+		     :end2 (+ nb 6)))
+	       (and (eq syntax :strict) (error "Reply is not XML"))
+	       (when (and nb
+			  (or (eql nb (search "<definitions" string))
+			      (and (eql nb (search "<" string))
+				   (search "definitions" string
+					   :start2 nb :end2 (+ nb 20)))))
+		 (setf string (concatenate 'string
+					   "<?xml version=\"1.0\" ?>"
+					   (subseq string nb)))
+		 (with-open-file (s (format nil "~A/~A.xml" folder name)
+				    :direction :output
+				    :if-exists :supersede)
+				 (write-line string s))
+		 t)
+	       (error "Reply is neither WSDL nor XML"))		    
+	   (xmeth-body i folder out name syntax 'xmeth-remote-insert)
 	   )))))
 
-(defun xmeth-one-local (&key (i 0) errorp (folder "xmethods") syntax)
+(defun xmeth-one-local (&key (i 0) errorp (folder "xmethods") (out "xmout") syntax)
   ;; assume WSDL is in local file
-  (let* ((name (read-from-string (format nil ":xmeth~3,'0D" i))))
+  (let* ((name (read-from-string (format nil ":xmeth~3,'0D" i)))
+	 (*xmeth-remote-external* (list :local))
+	 )
     (xmeth-errorp
      errorp i (format nil "~A/~A-2.txt" folder name)
-     #'(lambda (i) (xmeth-body i folder name syntax)))))
+     #'(lambda (i) (xmeth-body i folder out name syntax 'xmeth-local-insert)))))
 
-(defun xmeth-body (i folder name syntax)
-  (let* (vals (path (format nil "~A/~A.xml" folder name)))
+(defun xmeth-body (i folder out name syntax insert)
+  (let* (vals
+	 (iplace (list 0))
+	 (root (format nil "~A/~A" folder name))
+	 (path (format nil "~A.xml" root)))
     (or (probe-file path) (error "XML file not found."))
+    (setf (cdr *xmeth-remote-external*) (list root (list 0)))
     (setf vals (multiple-value-list
 		(decode-wsdl-file path
 				  :namespaces :decode
@@ -1546,9 +1696,11 @@ Individual tests:
 				  (list nil 
 					:xmeth-entry
 					(list (format nil "tns~A-" i) nil :prefix))
+				  :include (list insert root iplace)
+				  :import  (list insert root iplace)
 				  )))
 	   
-    (xmeth-services vals i folder name)
+    (xmeth-services vals i out name)
     ))
 
 (defun xmeth-one-decode (&optional (i 0) (folder "xmethods"))
@@ -1590,6 +1742,9 @@ Individual tests:
 	  )))))
 
 (defun xmeth-client (wconn s folder name j sns &aux r)
+  (cond ((null (probe-file folder)) (make-directory folder))
+	((not (file-directory-p folder))
+	 (error "Output must go to folder: ~S?" folder)))
   (setf r (make-client-interface wconn (first s)
 				 (if j
 				     (format nil "~A/~A-~A.cl"
@@ -1609,32 +1764,37 @@ Individual tests:
 
 
 (defun xmeth-summary (stream)
-  (setf *errors* (sort *errors* #'< :key #'second))
-  (format stream "~%Errors:~%~{ ~S~%~}"  *errors*)
-  (format stream "~%OK: ~A   All errors: ~A   Total: ~A~%"
+  (setf *soap-errors* (sort *soap-errors* #'< :key #'second))
+  (setf *xml-errors* (sort *xml-errors* #'< :key #'second))
+  (format stream "~%XML Errors:~%~{ ~S~%~}"  *xml-errors*)
+  (format stream "~%SOAP Errors:~%~{ ~S~%~}"  *soap-errors*)
+  (format stream "~%OK: ~A   SOAP errors: ~A   XML errors: ~A   Total: ~A~%"
 	  *ok*
 	  *bad*
-	  (+ *ok* *bad*))
+	  *bad-xml*
+	  (+ *ok* *bad* *bad-xml*))
   )
 
-(defun xmeth-all-remote (&key (start 0) syntax (end (length *xmethods*) e-p))
+(defun xmeth-all-remote (&key (start 0) (out "xmout") syntax
+			      (end (length *xmethods*) e-p))
   ;; fetch WSDL from URLs
   (xmeth-load)
   (or e-p (setf end (length *xmethods*)))
   (dribble "xmeth.log")
-  (setf *errors* nil *ok* 0 *bad* 0)
-  (dotimes (i end) (or (< i start) (xmeth-one-remote :i i :syntax syntax)))
+  (setf *soap-errors* nil *xml-errors* nil *ok* 0 *bad* 0 *bad-xml* 0) 
+  (dotimes (i end) (or (< i start) (xmeth-one-remote :i i :out out :syntax syntax)))
   (xmeth-summary t)
   (xmeth-save)
   (dribble))
 
-(defun xmeth-all-local (&key (start 0) syntax (end (length *xmethods*) e-p))
+(defun xmeth-all-local (&key (start 0) (out "xmout") syntax
+			     (end (length *xmethods*) e-p))
   ;; scan local WSDL files
   (xmeth-load)
   (or e-p (setf end (length *xmethods*)))
-  (setf *errors* nil *ok* 0 *bad* 0)
+  (setf *soap-errors* nil *xml-errors* nil *ok* 0 *bad* 0 *bad-xml* 0)
   (dribble "xmeth.log")
-  (dotimes (i end) (or (< i start) (xmeth-one-local :i i :syntax syntax)))
+  (dotimes (i end) (or (< i start) (xmeth-one-local :i i :out out :syntax syntax)))
   (xmeth-summary t)
   (xmeth-save)
   (dribble))
@@ -1865,15 +2025,9 @@ Individual tests:
      (when (or (null index) (eql index i))
        (multiple-value-bind (r a)
 	   (net.xmp:match-tree data pattern nil)
-	 (or (and (eql res r) (equal a alst))
-	     (format t "~&; test ~A   pattern: ~S   data: ~S~%"
-		     i pattern data))
-	 (or (eql res r) 
-	     (format t "~&;  results not eql expected ~S returned ~S~%"
-		     res r))
-	 (or (equal a alst)
-	     (format t "~&;  expected alist ~S returned ~S~%"
-		     alst a))
+	 (test res r :fail-info (list 'xmp-match-tests i :pattern pattern :data data))
+	 (test alst a :test #'equal
+	       :fail-info (list 'xmp-match-tests i :pattern pattern :data data))
 	 (cond ((and (eql res r) (equal a alst))
 		(incf good))
 	       (t (incf bad) (setf sum nil)))
@@ -1889,10 +2043,13 @@ Individual tests:
 	       ("URLLink"      "url-link")
 	       ("longURL"      "long-url")
 	       ("longIDString" "long-id-string")
+	       ("CAPS"         "caps")
 	       ))
-    (let ((in (first c)) r
-	  (out (second c)))
-      (cond ((equal out (setf r (net.xmp.soap::break-at-case-shifts in)))
+    (let* ((in (first c))
+	   (out (second c))
+	   (r (net.xmp.soap::break-at-case-shifts in))
+	   )
+      (cond ((test out r :test #'equal :fail-info (list 'xmp-break-tests in))
 	     (incf good))
 	    (t (incf bad) (setf all nil)
 	       (format t "~&; in:~S want:~S res:~S~%" in out r)))))
@@ -1947,3 +2104,533 @@ Individual tests:
 </xsd:schema>
 
 "))
+
+
+
+
+;;;
+;;; SOAP encoding tests
+
+(defun ts-debug (mode debug)
+  (case debug
+    ((:client :server) (eq mode debug))
+    (:stop (case mode (:client debug)))
+    (otherwise debug)))
+
+(defun ts-alog (log &key keep &aux oldlog)
+  (setf oldlog net.aserve::*enable-logging*)
+  (or keep (net.aserve:shutdown))
+  (setf net.aserve::*enable-logging* log)
+  oldlog)
+  
+
+(defvar *soap000* nil)
+(defun soap000 (&key (new t) debug nillable)
+  (when new (soap-new-environment))
+  (let* ((path    "/SOAP")
+	 (server (apply 'soap-message-server :start `(:port 0)
+				      :publish `(:path ,path)
+				      :lisp-package :keyword
+				      :soap-debug (ts-debug :server debug)
+				      (when nillable (list :nillable nillable))
+				      ))
+	 (wserver (net.xmp::xmp-aserve-server server))
+	 (socket  (net.aserve:wserver-socket wserver))
+	 (port    (socket:local-port socket))
+	 (url (format nil "http://localhost:~A~A" port path)))
+
+    (setf *soap000* server)
+
+    (define-soap-type nil :soap001
+      '(:complex
+	(:seq (:element
+	       "parts"
+	       (:complex
+		(:seq
+		 (:element "str" xsd:|string|)
+		 (:element "qnm" xsd:|QName|) ;;; needs different test???
+		 (:element "b64" xsd:|base64Binary|) ;;;needs different test???
+		 (:element "dec" xsd:|decimal|)
+		 (:element "long" xsd:|long|)
+		 (:element "ulong" xsd:|unsignedLong|)
+		 (:element "int"  xsd:|int|)
+		 (:element "uint"  xsd:|unsignedInt|)
+		 (:element "integer" xsd:|integer|)
+		 (:element "nonpos" xsd:|nonPositiveInteger|)
+		 (:element "nonneg"  xsd:|nonNegativeInteger|)
+		 (:element "neg"   xsd:|negativeInteger|)
+		 (:element "pos" xsd:|positiveInteger|)
+		 (:element "short" xsd:|short|)
+		 (:element "byte"  xsd:|byte|)
+		 (:element "ushort"  xsd:|unsignedShort|)
+		 (:element "ubyte" xsd:|unsignedByte|)
+		 (:element "bool"  xsd:|boolean|)
+		 (:element "float"  xsd:|float|)
+		 (:element "dbl"  xsd:|double|)
+			  
+		 ))))
+	))
+    (define-soap-element nil "msg000" 
+      '(:complex (:seq (:element "parts" (:complex (:seq* (:any)))))))
+    (define-soap-element nil "res000" 
+      '(:complex (:seq (:element "return" xsd:|string|))))
+    (define-soap-element nil "msg001" :soap001)
+
+    (soap-export-method server "msg000" '("parts")
+			:return "res000"  :action nil
+			:lisp-name 'soap000-msg000)
+    (soap-export-method server "msg001" '("parts")
+			:return "res000"  :action nil
+			:lisp-name 'soap000-msg000)
+    (soap-export-method server "msg002" '("parts")
+			:return "res000"  :action nil
+			:lisp-name 'soap002-msg002)
+    (soap-export-method server "soap003" '("str1" "str2" "str3" "str4")
+			:return "res000"  :action nil
+			:lisp-name '(soap003-msg003 :s1 :s2 :s3 :s4))
+    (soap-export-method server "soap003n" '("str1" "str2" "str3" "str4")
+			:return "res000"  :action nil
+			:lisp-name '(soap003-msg003 :s1 :s2 :s3 :s4))
+
+    (values url server)))
+
+(defun soap000-msg000 (&rest args)
+  (let* ((parts (member "parts" args :test #'string-equal)))
+    (list "return"
+	  (cond ((null parts)
+		 (if args
+		     (format nil ":other - ~A" args)
+		   ":none "))
+		((not (eq parts args))
+		 (format nil ":prefix - ~A" args))
+		((cddr parts)
+		 (format nil ":suffix - ~A" args))
+		((consp (second parts))
+		 (format nil ":parts ~{~A  ~}" (second parts)))
+		(t (format nil ":odd - ~S" (second parts)))))))
+
+(defun ts1001 (&key debug keep i log)
+
+  ;; Test simple data type encoding
+
+  (let (conn url (ok t) (key 'ts1001) oldlog)
+    (unwind-protect
+	(let ()
+	  (setf oldlog (ts-alog log :keep nil))
+	  (setf url (soap000 :debug debug))
+	  (setf conn (soap-message-client :url url
+					  :send-type nil
+					  :soap-debug (ts-debug :client debug)
+					  ))
+	  (let* ((msg 
+		  ;; Encode the element with the type specs in :soap001
+		  ;;  but msg000 is defined as any content, so decode with
+		  ;;  default decoders.
+		  (list :element "msg000" :soap001))
+		 expected decoded res (j 0))
+	    (dolist (parts
+		     `(
+		       ;; (sub-elt content)
+		       ;; ((sub-elt content) e1 e2
+		       ;;           e1 is expected result with default decoding
+		       ;;           e2 is expected result eith explicit decoding
+		       ;;           :call-error -- expect an error
+		       ;;           :none       -- skip this test
+		       ("str" "only a string")
+		       (("str" "")  ":parts (str)  " ":parts (str )  ") ;;; empty string
+		       (("str" nil) ":parts (str)  " ":parts (str )  ")
+		       (("qnm" xsd:|string|)
+			":parts (qnm xsd:string)  "  ":parts (qnm string)  ")
+		       ("dec" 12345)
+
+		       ;;("dec" 123.45)
+		       ;;("dec" 123/45)
+					   
+		       (("dec" nil) ":parts (dec 0)  ")
+		       (("dec" :foo) :call-error :none)
+		       ("long" 12345678)
+		       (("long" nil) ":parts (long 0)  ")
+		       ("ulong" 12345678)
+		       (("ulong" nil) ":parts (ulong 0)  ")
+		       (("ulong" -5) :call-error :none)
+		       ("int" 234)
+		       (("int" nil) ":parts (int 0)  ")
+		       ("uint" 234)
+		       (("uint" nil) ":parts (uint 0)  ")
+		       ("integer" 234)
+		       (("integer" nil) ":parts (integer 0)  ")
+		       ("nonpos" -456)
+		       ("nonpos" 0)
+		       (("nonpos" nil) ":parts (nonpos 0)  ")
+		       ("nonneg" 776)
+		       ("nonneg" 0)
+		       (("nonneg" nil) ":parts (nonneg 0)  ")
+		       ("neg" -888)
+		       ("pos" 345)
+		       (("pos" nil) ":parts (pos 0)  ")
+		       ("short" 1234)
+		       ("short" -1234)
+		       ("byte" 127)
+		       ("byte" -127)
+		       (("byte" 1278) :call-error :none)
+		       (("byte" 128) :call-error :none)
+		       (("byte" -129) :call-error :none)
+		       ("ushort" 1234)
+		       (("ushort" -8) :call-error :none)
+		       ("ubyte" 127)
+		       (("ubyte" -9) :call-error :none)
+		       (("ubyte" 256) :call-error :none)
+		       (("bool" 1)   ":parts (bool true)  " (":parts (bool ~A)  " t))
+		       (("bool" t)   ":parts (bool true)  " (":parts (bool ~A)  " t))
+		       (("bool" 0)   ":parts (bool true)  " (":parts (bool ~A)  " t))
+		       (("bool" nil) ":parts (bool false)  " (":parts (bool ~A)  " nil))
+		 
+		       ("str" "string argument" "int" 123 "pos" 456)
+		       ))
+	      (when (or (null i)
+			(eql i j)
+			(and (consp i) (member j i)))
+		(cond ((consp (first parts))
+		       (setf expected (second parts))
+		       (when (consp (setf decoded (third parts)))
+			 (setf decoded (apply 'format nil decoded)))
+		       (setf parts (first parts)))
+		      (t (setf decoded nil expected nil)))
+		(or expected (setf expected (format nil ":parts ~{(~A ~A)  ~}" parts)))
+		(or decoded (setf decoded expected))
+		(or
+		 (case expected
+		   (:call-error
+		    (test-error
+		     (call-soap-method conn msg "parts" parts)
+		     :fail-info (list* key j :encode parts)))
+		   (otherwise
+		    (test-no-error
+		     (setf res (soap-result-part 
+				conn (call-soap-method conn msg "parts" parts)
+				"res000" "return"))
+		     :fail-info (list* key j :encode parts))))
+		 (setf ok nil))
+		(or
+		 (eq expected :call-error)
+		 (test expected res :test #'equal
+		       :fail-info (list* key j :encoded parts))
+		 (setf ok nil))
+		(or
+		 (case decoded
+		   (:none t)
+		   (otherwise
+		    (test-no-error
+		     (setf res (soap-result-part 
+				conn (call-soap-method conn "msg001" "parts" parts)
+				"res000" "return"))
+		     :fail-info (list* key j :decode parts))))
+		 (setf ok nil))
+		(or
+		 (eq decoded :none)
+		 (test decoded res :test #'equal :fail-info (list* key j :decoded parts))
+		 (setf ok nil))
+		)
+	
+	      (incf j)
+	      )
+	    ))
+       
+      (ts-alog oldlog :keep keep))
+    ok))
+
+
+(defun soap002-msg002 (&rest args)
+  (let* ((conn *soap-server*)
+	 (body (soap-message-body conn))
+	 (msg (soap-result-pair conn body "msg002"))
+	 (mattr (soap-get-attributes conn msg))
+	 (parts (soap-result-pair conn msg nil "parts"))
+	 (pattr (soap-get-attributes conn parts))
+	 (sub1  (soap-result-pair conn parts nil "sub1"))
+	 (attr1 (soap-get-attributes conn sub1))
+	 (sub2  (soap-result-pair conn parts nil "sub2"))
+	 (attr2 (soap-get-attributes conn sub2))
+	 )
+    (list "return" 
+	  (let ((*print-pretty* nil))
+	    (format nil "msg:~A  parts:~A  sub1:~A  sub2:~A"
+		    mattr pattr attr1 attr2)))
+  ))
+
+
+
+(defun ts1002 (&key debug keep i log)
+
+  ;; Test attribute encoding
+
+  (let* (url conn (ok t) (j 0) (key 'ts1002)
+	     (attr1 (list "attr1" "on-element-def"))
+	     (attr2 (list "attr2" "on-type-2"))
+	     (attr3 (list "attr3" "on-type-3"))
+	     (attr4 (list "attr4" "on-parts-type"))
+	     (attr5 (list "attr5" "on-sub1"))
+	     (attr6 (list "attr6" "on-sub2"))
+	     (attr7 (list "attr7" "on-parts-elt"))
+	     oldlog
+	     )
+    (unwind-protect
+	(let ()
+	  (setf oldlog (ts-alog log :keep nil))
+	  (setf url (soap000 :debug debug))
+	  (define-soap-type nil :soap002a
+	    `(:complex (:seq (:element
+			      "parts"
+			      (:complex
+			       (:seq
+				(:element "sub1" xsd:|string| :attributes ,attr5)
+				(:element "sub2" xsd:|string| :attributes ,attr6)
+				)
+			       :attributes ,attr4)
+			      :attributes ,attr7))
+		       :attributes ,attr3))
+	  (define-soap-type nil :soap002 :soap002a :attributes attr2)
+			  
+	  (define-soap-element nil "msg002" :soap002 :attributes attr1)
+	  (setf conn (soap-message-client
+		      :url url
+		      :send-type nil
+		      :soap-debug (ts-debug :client debug)
+		      ))
+	  
+	  (flet ((pp (str &rest args)
+		     (let ((*print-pretty* nil))
+		       (apply #'format nil str args)))
+		 (skipij () (incf j) (and i (not (eql i j))))
+		 )
+
+	    (or (skipij)
+		(test
+		 (pp "msg:~A  parts:~A  sub1:~A  sub2:~A" attr1 attr7 attr5 attr6)
+		 (soap-result-string
+		  conn
+		  (call-soap-method
+		   conn "msg002" "parts" (list "sub1" "aaa" "sub2" "bbb"))
+		  nil nil)
+		 :test #'equal :fail-info (list key j))
+		(setf ok nil))
+
+	    (or (skipij)
+		(test
+		 (pp "msg:~A  parts:~A  sub1:~A  sub2:~A" attr2 attr7 attr5 attr6)
+		 (soap-result-string
+		  conn
+		  (call-soap-method conn '(:element "msg002" :soap002)
+				    "parts" (list "sub1" "aaa" "sub2" "bbb"))
+		  nil nil)
+		 :test #'equal :fail-info (list key j))
+		(setf ok nil))
+
+	    (or (skipij)
+		(test
+		 (pp "msg:~A  parts:~A  sub1:~A  sub2:~A" attr3 attr7 attr5 attr6)
+		 (soap-result-string
+		  conn
+		  (call-soap-method conn '(:element "msg002" :soap002a)
+				    "parts" (list "sub1" "aaa" "sub2" "bbb"))
+		  nil nil)
+		 :test #'equal :fail-info (list key j))
+		(setf ok nil))
+	    ))
+
+      (ts-alog oldlog :keep keep))
+
+    ok))
+
+
+
+(defun soap003-msg003 (&rest keys &key s1 s2 s3 s4)
+  (list "return"
+	(format nil "~{~A ~A ~}"
+		(append
+		 (when (member :s1 keys) (list :|s1| s1))
+		 (when (member :s2 keys) (list :|s2| s2))
+		 (when (member :s3 keys) (list :|s3| s3))
+		 (when (member :s4 keys)
+		   (typecase s4
+		     (integer (list :|i4| s4))
+		     (otherwise (list :|s4| s4))))))))
+
+
+(defun ts1003 (&key debug keep i log)
+
+  ;; Test :null-element handling [spr31688] and
+  ;;      [bug16269] keyword mapping in server
+
+  (let (url (ok t) (key :ts1003) (j 0) oldlog)
+    (unwind-protect
+	(dolist (nillable '(nil :accept :strict :ignore))
+	  (if nillable
+	      (ts-alog log :keep nil)
+	    ;; Remember old log setting only on first pass.
+	    (setf oldlog (ts-alog log :keep nil)))
+	  (setf url (soap000 :nillable nillable :debug debug))
+	  (define-soap-type nil :|soap003t|
+	    '(:complex
+	      (:seq
+	       (:element "str1" xsd:|string|)
+	       (:element "str2" xsd:|string|)
+	       (:element "str3" xsd:|string|)
+	       (:element "str4" xsd:|int|)			  
+	       )
+	      ))
+	  (define-soap-type nil :|soap003tn|
+	    '(:complex
+	      (:seq
+	       (:element "str1" xsd:|string| )
+	       (:element "str2" xsd:|string| :nillable t)
+	       (:element "str3" xsd:|string| :nillable t)
+	       (:element "str4" xsd:|int|    :nillable t)			  
+	       )
+	      ))
+	  (define-soap-element nil :|soap003| :|soap003t|)
+	  (define-soap-element nil :|soap003n| :|soap003tn|)
+	  (dolist
+	      (parts
+	       `(
+		 ;; (parts (nillable (null-element element expected)
+		 ;;                  ...
+		 ;;                  (null-element (element expected) ...)
+		 ;;                  ...)
+		 ;;         ...)	
+		 (("a" "b" "c" 17)
+		  (:all     (:all    (:|soap003|  "s1 a s2 b s3 c i4 17 ")
+				     (:|soap003n| "s1 a s2 b s3 c i4 17 "))
+			    )
+		  )
+		 (("a" "b" "c" nil)
+		  (nil      (:default       :|soap003|  "s1 a s2 b s3 c i4 0 ")
+			    (:default-value :|soap003|  "s1 a s2 b s3 c i4 0 ")
+			    (:empty         :|soap003|  "s1 a s2 b s3 c i4 0 ")
+			    (:nilled        :|soap003|  "s1 a s2 b s3 c i4 0 ")
+			    (:none          :|soap003|  "s1 a s2 b s3 c ")
+			    )
+		  (:accept  (:nilled        :|soap003n| "s1 a s2 b s3 c ")
+			    )
+		  )
+		 (("a" "b" nil 17)
+		  (nil      (:default       :|soap003|  "s1 a s2 b s3  i4 17 ")
+			    (:default-value :|soap003|  "s1 a s2 b s3  i4 17 ")
+			    (:empty         :|soap003|  "s1 a s2 b s3  i4 17 ")
+			    (:nilled        :|soap003|  "s1 a s2 b s3  i4 17 ")
+			    (:none          :|soap003|  "s1 a s2 b i4 17 ")
+			    )
+		  (:accept  (:nilled        :|soap003n| "s1 a s2 b i4 17 ")
+			    )
+		  )
+		 (("a" nil "c" 17)
+		  (nil      (:default       :|soap003|  "s1 a s2  s3 c i4 17 ")
+			    (:default-value :|soap003|  "s1 a s2  s3 c i4 17 ")
+			    (:empty         :|soap003|  "s1 a s2  s3 c i4 17 ")
+			    (:none          :|soap003|  "s1 a s3 c i4 17 ")
+			    )
+		  )
+		 ((nil "b" "c" 17)
+		  (nil      (:default       :|soap003|  "s1  s2 b s3 c i4 17 ")
+			    (:default-value :|soap003|  "s1  s2 b s3 c i4 17 ")
+			    (:empty         :|soap003|  "s1  s2 b s3 c i4 17 ")
+			    (:nilled        :|soap003|  "s1  s2 b s3 c i4 17 ")
+			    (:none          :|soap003|  "s2 b s3 c i4 17 ")
+			    )
+		  (:accept  (:nilled        :|soap003n| "s2 b s3 c i4 17 ")
+			    )
+		  (:strict  (:nilled        :|soap003n| "s1  s2 b s3 c i4 17 ")
+			    )
+		  )
+		 (("a" "b" "c" :none)
+		  (:all     (:all        :|soap003| "s1 a s2 b s3 c ")
+			    (:all        :|soap003n| "s1 a s2 b s3 c ")
+			    )
+		  )
+		 (("a" "b" :none 17)
+		  (:all      (:all       :|soap003| "s1 a s2 b i4 17 ")
+			     (:all       :|soap003n| "s1 a s2 b i4 17 ")
+			    )
+		  )
+		 (("a" :none "c" 17)
+		  (:all      (:all       :|soap003| "s1 a s3 c i4 17 ")
+			     (:all       :|soap003n| "s1 a s3 c i4 17 ")
+			    )
+		  )
+		 ((:none "b" "c" 17)
+		  (:all      (:all      :|soap003| "s2 b s3 c i4 17 ")
+			     (:all      :|soap003n| "s2 b s3 c i4 17 ")
+			    )
+		  )
+
+		 ))
+
+	    (dolist (null-elt '(:default :default-value :empty :none :nilled
+					 :nilled-or-default :nilled-or-empty
+					 :nilled-or-none))
+	      
+	      (let* (
+		     (strs (first parts))
+		     (s1 (first strs))
+		     (s2 (second strs))
+		     (s3 (third strs))
+		     (s4 (fourth strs))
+		     (nl-entry (or (assoc :all (cdr parts))
+				   (assoc nillable (cdr parts))))
+		     (ne-entry (or (assoc :all (cdr nl-entry))
+				   (assoc null-elt (cdr nl-entry))))
+		     (e-list (if (consp (second ne-entry))
+				 (cdr ne-entry)
+			       (when ne-entry (list (cdr ne-entry))))))
+		(dolist (entry e-list)
+		  (when (or (null i)
+			    (eql i j)
+			    (and (consp i) (member j i)))
+		    (let* ((element (first entry))
+			   (expected (second entry))
+			   conn)
+		      (setf conn (apply 'soap-message-client :url url
+					:send-type nil
+					:soap-debug (ts-debug :client debug)
+					(case null-elt
+					  (:default nil)
+					  (otherwise (list :null-element null-elt)))
+					))
+		      (flet ((send (key s) (case s
+					     (:none nil)
+					     (otherwise (list key s)))))
+			(flet ((docall
+				()
+				(apply 'call-soap-method conn
+				       element
+				       (append
+					(send "str1" s1)
+					(send "str2" s2)
+					(send "str3" s3)
+					(send "str4" s4))))
+			       )
+			  (etypecase expected
+			    (string
+			     (or
+			      (test expected
+				    (soap-result-string conn (docall) nil "return")
+				    :test #'equal
+				    :fail-info (list key j nillable null-elt element strs))
+			      (setf ok nil)))
+			    ((member :error)
+			     (or (test-error
+				  (docall)
+				  :announce t
+				  :fail-info (list key j nillable null-elt element strs))
+				 (setf ok nil)))
+			    )))
+		    
+		      ))
+		  (incf j)
+		  )))
+	    ))
+       
+      (ts-alog oldlog :keep keep))
+    ok)) 
+ 
+

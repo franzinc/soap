@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-schema.cl,v 2.8 2005/12/08 21:10:51 layer Exp $
+;; $Id: xmp-schema.cl,v 2.9 2006/08/28 20:27:07 mm Exp $
 
 ;; XML Schema support
 
@@ -31,11 +31,15 @@
    #:define-schema-default-part
    #:schema-types
    #:schema-elements
+   #:schema-groups
+   #:schema-a-groups
    #:schema-target
+   #:schema-source
+   #:schema-context
    #:schema-collect-target
    #:schema-file-connector
    #:schema-decode-attribute
-   #:schema-decoded-attribute
+   #:schema-decode-attributes
    #:schema-raw-attribute
    #:define-schema-ignored-part
    #:schema-component
@@ -54,9 +58,15 @@
    #:schema-element-tag
    #:schema-component-content
    #:schema-component-name
+   #:schema-component-raw-attributes
    #:schema-lookup-type
    #:schema-lookup-element
    #:schema-merge-types 
+   #:schema-listify
+   #:schema-targeted-name
+
+   #:loose-type
+   #:targeted-type
 
    ))
 
@@ -177,6 +187,9 @@
 (eval-when (compile)
   (defpackage :net.xmp.schema (:use) (:nicknames :xs :xsd))
   (defpackage :net.xmp.schema-instance (:use) (:nicknames :xsi))
+  (defmacro xsd (x) (list 'xmp-symbol x :net.xmp.schema))
+  (defmacro xsi (x) (list 'xmp-symbol x :net.xmp.schema-instance))
+  (defpackage :net.xmp (:export xsd xsi))
   )
 
 (defun add-to-list (item place)
@@ -230,6 +243,7 @@
    (schema-component-content
     ;; list of content instances
     :accessor schema-component-content :initarg :schema-component-content)
+   (schema-source :reader schema-source :initarg :schema-source)
    ))
 
 (defmethod schema-component-name ((c schema-component))
@@ -299,10 +313,28 @@
 (defmethod schema-collector-to-type ((sub null) &key options)
   (list* :complex (list :seq) options))
 
-(defmethod schema-error-p ((conn t) error-p &rest fmt)
-  (if error-p
-      (apply 'error fmt)
-    (values nil (apply 'format nil fmt))))
+(defmethod schema-error-p ((conn t) error-p &rest fmtin &aux fmt)
+  (case error-p
+    ((nil)  (values nil))
+    (otherwise
+     (setf fmt
+	   (mapcar #'(lambda (fm)
+		       (typecase fm
+			 (schema-component
+			  (schema-listify fm))
+			 (otherwise fm)))
+		   fmtin))
+     (case error-p
+       (:report (values nil (apply 'format nil fmt)))
+       (:cont (apply #'cerror "Continue" fmt))
+       (otherwise (apply #'error fmt))))))
+
+(defmethod schema-listify ((comp t)) comp)
+(defmethod schema-listify ((comp schema-component))
+  (list* (append (list (schema-element-tag comp) (schema-element-key comp))
+		(schema-component-raw-attributes comp)
+		(schema-component-decoded-attributes comp))
+	 (mapcar #'schema-listify (schema-component-content comp))))
 
 (defmethod schema-merge-types ((conn t) base ext &key options error-p)
   (let* ((b-kind (when (consp base) (first base)))
@@ -337,8 +369,8 @@
 
 
 (defmethod schema-parts-to-type ((comp schema-component) 
-				 &key options (error-p t) conn
-				 &aux part ext sub key base b-def b-type extype)
+				 &key options (error-p t) (conn (schema-source comp))
+				 &aux part ext sub key base b-type extype)
   (setf key (schema-element-key comp))
   (cond ((eq key :complex-type)
 	 (cond ((setf sub (schema-single-collector comp))
@@ -349,40 +381,54 @@
 		(cond
 		 ((setf ext (schema-single-part part :extension))
 		  (cond
-		   ((setf base (schema-decoded-attribute ext "base"))
+		   ((and (setf b-type (schema-base-type conn ext))
+			 (xmp-collection-type-p conn b-type))
 		    (cond
-		     ((setf b-def (schema-lookup-type conn base))
+		     ((setf sub (schema-single-collector ext))
 		      (cond
-		       ((and (setf b-type (schema-parts-to-type b-def :error-p nil
-								:conn conn))
-			     (xmp-collection-type-p conn b-type))
+		       ((setf extype (schema-parts-to-type sub))
 			(cond
-			 ((setf sub (schema-single-collector ext))
+			 ((xmp-collection-type-p conn extype)
 			  (cond
-			   ((setf extype (schema-parts-to-type sub))
-			    (cond
-			     ((xmp-collection-type-p conn extype)
-			      (cond
-			       ((schema-merge-types conn b-type extype :error-p error-p))
-			       (t (schema-error-p conn error-p 
-						  "incompatible base and extension ~S ~S"
-						  b-type extype))))
-			     (t (schema-error-p conn error-p
-						"unrecognized extension ~S" extype))))
-			   (t (schema-error-p
-			       conn error-p
-			       "unrecognixed content in extension ~S" ext))))
-			 ((null (schema-component-content ext))
-			  b-type)))
+			   ((schema-merge-types conn b-type extype :error-p error-p))
+			   (t (schema-error-p conn error-p 
+					      "incompatible base and extension ~S ~S"
+					      b-type extype))))
+			 (t (schema-error-p conn error-p
+					    "unrecognised extension ~S" extype))))
 		       (t (schema-error-p
-			   conn error-p "base type is not collection ~S" b-def))))
-		     (t (schema-error-p
-			 conn error-p "undefined base type ~S" base))))
+			   conn error-p
+			   "unrecognised content in extension ~S" ext))))
+		     ((null (schema-component-content ext))
+		      b-type)))
 		   (t (schema-error-p
-		       conn error-p "extension without a base type"))))
+		       conn error-p "base type is not collection: ~S ~S" ext b-type))))
 		 (t (schema-error-p
-		     conn error-p "unrecognised complexContent"))))
-	       (t (schema-error-p conn error-p "Unknown complexType."))))
+		     conn error-p "unrecognised complexContent ~S" part))))
+	       ((setf part (schema-single-part comp :simple-content))
+		(cond
+		 ((setf ext (schema-single-part part :extension))
+		  (cond
+		   ((setf b-type (schema-base-type conn ext))
+		    (list :simple b-type))
+		   (t (schema-error-p
+		       conn error-p "base type is not recognized in ~S" part))))
+		 ((setf ext (schema-single-part part :restriction))
+		  (cond
+		   ((setf b-type (schema-base-type conn ext))
+		    (list :simple b-type))
+		   (t (schema-error-p
+		       conn error-p "base type is not recognized in ~S" part))))
+		 (t (schema-error-p
+		       conn error-p "unrecognized simpleContent ~S" part))))
+	       ((and (setf part (schema-single-part comp :group))
+		     (setf sub (schema-component-to-collector part)))
+		(list :complex sub))
+	       ((null (schema-single-part
+		       comp :element :more-p t :only-p t
+		       :ignored '(:attribute :a-group :any-attribute)))
+		(schema-collector-to-type nil :options options))
+	       (t (schema-error-p conn error-p "Unknown complexType: ~S" comp))))
 	((xmp-collector-p nil key)
 	 (schema-collector-to-type comp :options options))
 	((or (setf part (schema-single-part comp :complex-type))
@@ -393,15 +439,17 @@
 		(schema-collector-to-type sub :options options))
 	       ((null (schema-component-content part))
 		(schema-collector-to-type nil :options options))
-	       (t (schema-error-p conn error-p "Unknown complex-type."))))
+	       (t (schema-error-p conn error-p "Unknown complex-type: ~S" comp))))
 
 	((eq key :simple-type)
 	 (cond ((and (setf part (schema-single-part comp :restriction))
 		     (setf base (schema-decoded-attribute part "base")))
 		base)
-	       ((schema-single-part comp :list)
-		'xs:|string|)
-	       (t (schema-error-p conn error-p "Unknown simple-type."))))
+	       ((schema-single-part comp :list) (list :simple (xsd "string")))
+	       ((and (setf sub (schema-single-part comp :ignored))
+		     (eq :union (schema-element-key sub)))
+		(list :simple (xsd "string")))
+	       (t (schema-error-p conn error-p "Unknown simple-type: ~S" comp))))
 
 	((eq key :simple-content)
 	 (cond ((and (setf part (schema-single-part comp :extension))
@@ -410,16 +458,24 @@
 	       ((and (setf part (schema-single-part comp :restriction))
 		     (setf base (schema-decoded-attribute part "base")))
 		base)
-	  
+	       (t (schema-error-p conn error-p "Unknown simple-content: ~S" comp))
 	       ))
 
-	(t (schema-error-p conn error-p "Unknown part type."))))
+	(t (schema-error-p conn error-p "Unknown part type: ~S" comp))))
 
 
-(defmethod schema-component-to-collector ((comp schema-component))
+(defmethod schema-component-to-collector ((comp schema-component) &aux exp)
   (cond ((xmp-collector-p nil (schema-element-key comp))
 	 (list* (schema-element-key comp)
-		(mapcan #'schema-component-to-cpart (schema-component-content comp))))))
+		(mapcan #'schema-component-to-cpart (schema-component-content comp))))
+	((not (eq :group (schema-element-key comp))))
+	((null (setf exp (schema-component-to-cpart comp))) nil)
+	((not (consp exp)) (list :seq exp))
+	((and (null (cdr exp)) (consp (first exp))
+	      (xmp-collector-p nil (first (first exp))))
+	 (first exp))
+	(t (cons :seq exp))
+	))
 
 
 (defmethod schema-element-name ((comp schema-component))
@@ -431,7 +487,7 @@
 	 
 
 (defmethod schema-component-to-cpart ((comp schema-component)
-				      &aux n (key (schema-element-key comp)))
+				      &aux ref rdef n (key (schema-element-key comp)))
   (cond
     ((xmp-collector-p nil key)
      (list (schema-component-to-collector comp)))
@@ -446,6 +502,13 @@
 		 (or (equalp n "true") (equal n "1"))
 		 (list :nillable t))
 	    )))
+    ((eq key :group)     ;;; [bug16201]
+     (cond ((null (setf ref (schema-raw-attribute comp "ref")))
+	    ;; must be a <group> definition collected earlier during parse
+	    nil)
+	   ((null (setf rdef (schema-lookup-group (schema-source comp) ref)))
+	    (error "Undefined group reference ~A" ref))
+	   (t (list (schema-component-to-collector (schema-single-collector rdef))))))
     ((eq key :annotation) nil)
     ((eq key :documentation) nil)
     ((eq key :any) (list (list :any)))
@@ -480,7 +543,7 @@
 	))
 
 (defmethod xmp-begin-message ((conn schema-file-connector))
-  (list :seq1 'xs:|schema|))
+  (list :seq1 (xsd "schema")))
 
 
 (defmethod xmp-end-message ((conn schema-file-connector) data
@@ -497,11 +560,13 @@
   (call-next-method))
 
 (defmethod schema-make-element ((conn schema-file-connector) elt
-				&rest keys &key tag attributes class &allow-other-keys)
+				&rest keys &key tag attributes class
+				&allow-other-keys &aux outer)
   (declare (ignore keys))
   (cond (tag)
 	((member elt (schema-ignored-messages conn)) (setf tag :ignored))
-	((eq :ignored (schema-element-key (first (schema-component-stack conn))))
+	((or (null (setf outer (first (schema-component-stack conn))))
+	     (eq :ignored (schema-element-key outer)))
 	 (push elt (schema-ignored-messages conn))
 	 (setf tag :ignored))
 	(t (format t "~&;; Unexpected schema element ~S given tag :ignored.~%" elt)
@@ -513,6 +578,7 @@
 		 :schema-component-raw-attributes attributes
 		 :schema-component-decoded-attributes
 		 (schema-decode-attributes conn attributes :in)
+		 :schema-source conn
 		 ))
 
 (defmethod xmp-complex-content ((conn schema-file-connector) (elt t) data
@@ -559,16 +625,17 @@
   ;;             (((simpleType | complexType | group | attributeGroup)
   ;;               | element | attribute | notation), annotation*)*)
   ;; </schema>
-  (define-xmp-element nil 'xs:|schema| '(:complex
-					 (:seq? 
-					  (:set* xs:|include| xs:|import| 
-						 xs:|redefine| xs:|annotation|)
-					  (:set* (:seq
-						  (:or xs:|simpleType| xs:|complexType| 
-						       xs:|group| xs:|attributeGroup|)
-						  xs:|element| 
-						  xs:|attribute| xs:|notation| )
-						 xs:|annotation|))))
+  (define-xmp-element nil (xsd "schema")
+    `(:complex
+      (:seq? 
+       (:set* ,(xsd "include") ,(xsd "import") 
+	      ,(xsd "redefine") ,(xsd "annotation"))
+       (:set* (:seq
+	       (:or ,(xsd "simpleType") ,(xsd "complexType") 
+		    ,(xsd "group") ,(xsd "attributeGroup"))
+	       ,(xsd "element") 
+	       ,(xsd "attribute") ,(xsd "notation") )
+	      ,(xsd "annotation")))))
 
   ;; <element
   ;;   abstract = boolean : false
@@ -588,14 +655,15 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, ((simpleType | complexType)?, (unique | key | keyref)*))
   ;; </element>
-  (define-xmp-element nil 'xs:|element| '(:complex
-					  (:seq? xs:|annotation|
-						 (:seq
-						  (:or xs:|simpleType| xs:|complexType|)
-						  (:set*
-						   xs:|unique|
-						   xs:|key|   
-						   xs:|keyref|)))))
+  (define-xmp-element nil (xsd "element")
+    `(:complex
+      (:seq? ,(xsd "annotation")
+	     (:seq
+	      (:or ,(xsd "simpleType") ,(xsd "complexType"))
+	      (:set*
+	       ,(xsd "unique")
+	       ,(xsd "key")   
+	       ,(xsd "keyref"))))))
 
   ;; <group
   ;;   id = ID
@@ -606,9 +674,10 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (all | choice | sequence)?)
   ;; </group>
-  (define-xmp-element nil 'xs:|group|  '(:complex (:seq? xs:|annotation|
-							 (:or xs:|all| xs:|choice|
-							      xs:|sequence|))))
+  (define-xmp-element nil (xsd "group")
+    `(:complex (:seq? ,(xsd "annotation")
+		      (:or ,(xsd "all") ,(xsd "choice")
+			   ,(xsd "sequence")))))
 
   ;; <complexType
   ;;   abstract = boolean : false
@@ -623,17 +692,18 @@
   ;;                               ((attribute | attributeGroup)*, anyAttribute?)
   ;;                            )))
   ;; </complexType>
-  (define-xmp-element nil 'xs:|complexType|
-    '(:complex
-      (:seq? xs:|annotation|
-	     (:or xs:|simpleContent| xs:|complexContent|
-		  (:seq (:or xs:|group| xs:|all| xs:|choice| xs:|sequence|)
-			(:set* xs:|attribute| xs:|attributeGroup|)
-			xs:|anyAttribute|))
+  (define-xmp-element nil (xsd "complexType")
+    `(:complex
+      (:seq? ,(xsd "annotation")
+	     (:or ,(xsd "simpleContent") ,(xsd "complexContent")
+		  (:seq (:or ,(xsd "group") ,(xsd "all")
+			     ,(xsd "choice") ,(xsd "sequence"))
+			(:set* ,(xsd "attribute") ,(xsd "attributeGroup"))
+			,(xsd "anyAttribute")))
 
 	     (:maybe 
-	      xs:|any|
-	      xs:|element|
+	      ,(xsd "any")
+	      ,(xsd "element")
 	      (:any) ;;;wsdl:element  occurs in Agni Find MP3 on xmethods
 	      ))))
 
@@ -643,13 +713,14 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation | (simpleType | complexType | group | attributeGroup))*
   ;; </redefine>
-  (define-xmp-element nil 'xs:|redefine| '(:complex (:seq? xs:|annotation|
-							   (:or 
-							    xs:|simpleType| 
-							    xs:|complexType| 
-							    xs:|group|
-							    xs:|attributeGroup| 
-							    ))))
+  (define-xmp-element nil (xsd "redefine")
+    `(:complex (:seq? ,(xsd "annotation")
+		      (:or 
+		       ,(xsd "simpleType") 
+		       ,(xsd "complexType") 
+		       ,(xsd "group")
+		       ,(xsd "attributeGroup") 
+		       ))))
 
   ;; <attribute
   ;;   default = string
@@ -663,8 +734,9 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, simpleType?)
   ;; </attribute>
-  (define-xmp-element nil 'xs:|attribute|  '(:complex
-					     (:seq? xs:|simpleType| xs:|annotation|)))
+  (define-xmp-element nil (xsd "attribute")
+    `(:complex
+      (:seq? ,(xsd "simpleType") ,(xsd "annotation"))))
 
   ;; <attributeGroup
   ;;   id = ID
@@ -673,21 +745,22 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, ((attribute | attributeGroup)*, anyAttribute?))
   ;; </attributeGroup>
-  (define-xmp-element nil 'xs:|attributeGroup| '(:complex
-						 (:seq? xs:|annotation|
-							(:set*
-							 xs:|attribute|
-							 xs:|attributeGroup|)
-							xs:|anyAttribute| 
-							)))
+  (define-xmp-element nil (xsd "attributeGroup") 
+    `(:complex
+      (:seq? ,(xsd "annotation")
+	     (:set*
+	      ,(xsd "attribute")
+	      ,(xsd "attributeGroup"))
+	     ,(xsd "anyAttribute") 
+	     )))
 
   ;; <annotation
   ;;   id = ID
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (appinfo | documentation)*
   ;; </annotation>
-  (define-xmp-element nil 'xs:|annotation|
-    `(:complex (:seq? (:set* xs:|appinfo| xs:|documentation|)
+  (define-xmp-element nil (xsd "annotation")
+    `(:complex (:seq? (:set* ,(xsd "appinfo") ,(xsd "documentation"))
 		      (:maybe ,(xmp-any-cpart nil)))))
 
   ;; <appinfo
@@ -695,7 +768,7 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: ({any})*
   ;; </appinfo>
-  (define-xmp-element nil 'xs:|appinfo|        (xmp-any-type nil))
+  (define-xmp-element nil (xsd "appinfo")        (xmp-any-type nil))
 
   ;; <documentation
   ;;   source = anyURI
@@ -703,7 +776,7 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: ({any})*
   ;; </documentation>
-  (define-xmp-element nil 'xs:|documentation|  (xmp-any-type nil))
+  (define-xmp-element nil (xsd "documentation")  (xmp-any-type nil))
 
   ;; <all
   ;;   id = ID
@@ -712,8 +785,8 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, element*)
   ;; </all>
-  (define-xmp-element nil 'xs:|all|           
-    '(:complex (:seq? xs:|annotation| (:seq* xs:|element|))))
+  (define-xmp-element nil (xsd "all")           
+    `(:complex (:seq? ,(xsd "annotation") (:seq* ,(xsd "element")))))
 
   ;; <sequence
   ;;   id = ID
@@ -722,9 +795,10 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (element | group | choice | sequence | any)*)
   ;; </sequence>
-  (define-xmp-element nil 'xs:|sequence|
-    '(:complex (:seq? xs:|annotation|
-		      (:set* xs:|element| xs:|group| xs:|choice| xs:|sequence| xs:|any|))))
+  (define-xmp-element nil (xsd "sequence")
+    `(:complex (:seq? ,(xsd "annotation")
+		      (:set* ,(xsd "element") ,(xsd "group")
+			     ,(xsd "choice") ,(xsd "sequence") ,(xsd "any")))))
 
   ;; <choice
   ;;   id = ID
@@ -733,9 +807,10 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (element | group | choice | sequence | any)*)
   ;; </choice>
-  (define-xmp-element nil 'xs:|choice|
-    '(:complex (:seq? xs:|annotation| 
-		      (:set* xs:|element| xs:|group| xs:|choice| xs:|sequence| xs:|any|))))
+  (define-xmp-element nil (xsd "choice")
+    `(:complex (:seq? ,(xsd "annotation") 
+		      (:set* ,(xsd "element") ,(xsd "group")
+			     ,(xsd "choice") ,(xsd "sequence") ,(xsd "any")))))
   
   ;; <any
   ;;   id = ID
@@ -747,7 +822,7 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?)
   ;; </any>
-  (define-xmp-element nil 'xs:|any|            '(:complex (:seq? xs:|annotation|)))
+  (define-xmp-element nil (xsd "any")         `(:complex (:seq? ,(xsd "annotation"))))
 
   ;; <anyAttribute
   ;;   id = ID
@@ -757,7 +832,7 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?)
   ;; </anyAttribute>
-  (define-xmp-element nil 'xs:|anyAttribute|   '(:complex (:set* xs:|annotation|)))
+  (define-xmp-element nil (xsd "anyAttribute")   `(:complex (:set* ,(xsd "annotation"))))
 
   ;; <simpleType
   ;;   final = (#all | List of (list | union | restriction))
@@ -766,19 +841,20 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (restriction | list | union))
   ;; </simpleType>
-  (define-xmp-element nil 'xs:|simpleType|     '(:complex
-						 (:seq?
-						  xs:|annotation|
-						  (:or xs:|restriction|
-						       xs:|list|
-						       xs:|union|)
-						  (:maybe
-						   ;; This does not seem to be legal
-						   ;; XML Schema syntax but it does
-						   ;; occur in IHS Web Service def
-						   xs:|simpleContent|
-						   )
-						  )))
+  (define-xmp-element nil (xsd "simpleType") 
+    `(:complex
+      (:seq?
+       ,(xsd "annotation")
+       (:or ,(xsd "restriction")
+	    ,(xsd "list")
+	    ,(xsd "union"))
+       (:maybe
+	;; This does not seem to be legal
+	;; XML Schema syntax but it does
+	;; occur in IHS Web Service def
+	,(xsd "simpleContent")
+	)
+       )))
 
 
   ;; <restriction
@@ -803,21 +879,21 @@
   ;;                  | enumeration | whiteSpace | pattern)*)?,
   ;;              ((attribute | attributeGroup)*, anyAttribute?))
   ;; </restriction>
-  (define-xmp-element nil 'xs:|restriction|
-    '(:complex (:seq? xs:|annotation|
-		      xs:|simpleType|
-		      (:set* xs:|minExclusive| xs:|minInclusive|
-			     xs:|maxExclusive| xs:|maxInclusive|
-			     xs:|totalDigits| xs:|fractionDigits|
-			     xs:|length| xs:|minLength| xs:|maxLength|
-			     xs:|enumeration|
-			     xs:|whiteSpace|
-			     xs:|pattern|)
-		      (:set* xs:|attribute| xs:|attributeGroup|)
-		      :xs|anyAttribute|
+  (define-xmp-element nil (xsd "restriction")
+    `(:complex (:seq? ,(xsd "annotation")
+		      ,(xsd "simpleType")
+		      (:set* ,(xsd "minExclusive") ,(xsd "minInclusive")
+			     ,(xsd "maxExclusive") ,(xsd "maxInclusive")
+			     ,(xsd "totalDigits") ,(xsd "fractionDigits")
+			     ,(xsd "length") ,(xsd "minLength") ,(xsd "maxLength")
+			     ,(xsd "enumeration")
+			     ,(xsd "whiteSpace")
+			     ,(xsd "pattern"))
+		      (:set* ,(xsd "attribute") ,(xsd "attributeGroup"))
+		      ,(xsd "anyAttribute")
 		      (:maybe
-		       xs:|sequence|
-		       xs:|maxlength| ;;; mis-spelled in one WSDL at XMethods
+		       ,(xsd "sequence")
+		       ,(xsd "maxlength") ;;; mis-spelled in one WSDL at XMethods
 		       ))))
 
   ;; <simpleContent
@@ -825,8 +901,10 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (restriction | extension))
   ;; </simpleContent>
-  (define-xmp-element nil 'xs:|simpleContent| 
-    '(:complex (:seq? xs:|annotation| (:set* xs:|restriction| xs:|extension|))))
+  (define-xmp-element nil (xsd "simpleContent")
+    `(:complex (:seq? ,(xsd "annotation")
+		      (:set* ,(xsd "restriction")
+			     ,(xsd "extension")))))
 
   ;; <union
   ;;   id = ID
@@ -834,8 +912,9 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, simpleType*)
   ;; </union>
-  (define-xmp-element nil 'xs:|union| '(:complex (:seq? xs:|annotation| 
-							(:seq* xs:|simpleType|))))
+  (define-xmp-element nil (xsd "union")
+    `(:complex (:seq? ,(xsd "annotation") 
+		      (:seq* ,(xsd "simpleType")))))
 
   ;; <extension
   ;;   base = QName
@@ -852,11 +931,11 @@
   ;;              ( (group | all | choice | sequence)?,
   ;;                ((attribute | attributeGroup)*, anyAttribute?)))
   ;; </extension>
-  (define-xmp-element nil 'xs:|extension|
-    '(:complex (:seq? xs:|annotation|
-		      (:or xs:|group| xs:|all| xs:|choice| xs:|sequence|)
-		      (:set* xs:|attribute| xs:|attributeGroup|)
-		      xs:|anyAttribute|
+  (define-xmp-element nil (xsd "extension")
+    `(:complex (:seq? ,(xsd "annotation")
+		      (:or ,(xsd "group") ,(xsd "all") ,(xsd "choice") ,(xsd "sequence"))
+		      (:set* ,(xsd "attribute") ,(xsd "attributeGroup"))
+		      ,(xsd "anyAttribute")
 		      )))
 
   ;; <enumeration
@@ -865,7 +944,7 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?)
   ;; </enumeration>
-  (define-xmp-element nil 'xs:|enumeration| '(:complex (:seq? xs:|annotation|)))
+  (define-xmp-element nil (xsd "enumeration") `(:complex (:seq? ,(xsd "annotation"))))
 
   ;; <complexContent
   ;;   id = ID
@@ -873,9 +952,9 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (restriction | extension))
   ;; </complexContent>
-  (define-xmp-element nil 'xs:|complexContent|
-    '(:complex (:seq? xs:|annotation|
-		      (:or xs:|restriction| xs:|extension|))))
+  (define-xmp-element nil (xsd "complexContent")
+    `(:complex (:seq? ,(xsd "annotation")
+		      (:or ,(xsd "restriction") ,(xsd "extension")))))
 
   ;; <field
   ;;   id = ID
@@ -883,20 +962,20 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?)
   ;; </field>
-  (define-xmp-element nil 'xs:|field|   '(:complex (:seq? xs:|annotation|)))
+  (define-xmp-element nil (xsd "field")   `(:complex (:seq? ,(xsd "annotation"))))
 
-  (define-xmp-element nil 'xs:|length|  '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|import|  '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|include| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|pattern| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|selector| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|maxInclusive| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|minInclusive| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|maxExclusive| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|minExclusive| '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|maxLength|    '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|maxlength|    '(:complex (:seq? xs:|annotation|)))
-  (define-xmp-element nil 'xs:|minLength|    '(:complex (:seq? xs:|annotation|)))
+  (define-xmp-element nil (xsd "length")  `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "import")  `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "include") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "pattern") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "selector") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "maxInclusive") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "minInclusive") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "maxExclusive") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "minExclusive") `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "maxLength")    `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "maxlength")    `(:complex (:seq? ,(xsd "annotation"))))
+  (define-xmp-element nil (xsd "minLength")    `(:complex (:seq? ,(xsd "annotation"))))
 
   ;; <key
   ;;   id = ID
@@ -904,9 +983,9 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (selector, field+))
   ;; </key>
-  (define-xmp-element nil 'xs:|key|     '(:complex (:seq? xs:|annotation|
-							  (:seq1 xs:|selector|)
-							  (:seq+ xs:|field|)
+  (define-xmp-element nil (xsd "key")     `(:complex (:seq? ,(xsd "annotation")
+							  (:seq1 ,(xsd "selector"))
+							  (:seq+ ,(xsd "field"))
 							  )))
 
   ;; <keyref
@@ -916,9 +995,9 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (selector, field+))
   ;; </keyref>
-  (define-xmp-element nil 'xs:|keyref|  '(:complex (:seq? xs:|annotation|
-							  (:seq1 xs:|selector|)
-							  (:seq+ xs:|field|)
+  (define-xmp-element nil (xsd "keyref")  `(:complex (:seq? ,(xsd "annotation")
+							  (:seq1 ,(xsd "selector"))
+							  (:seq+ ,(xsd "field"))
 							  )))
 
   ;; <unique
@@ -927,9 +1006,9 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (selector, field+))
   ;; </unique>
-  (define-xmp-element nil 'xs:|unique|  '(:complex (:seq? xs:|annotation|
-							  (:seq1 xs:|selector|)
-							  (:seq+ xs:|field|)
+  (define-xmp-element nil (xsd "unique")  `(:complex (:seq? ,(xsd "annotation")
+							  (:seq1 ,(xsd "selector"))
+							  (:seq+ ,(xsd "field"))
 							  )))
 
   ;; <list
@@ -938,13 +1017,13 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, simpleType?)
   ;; </list>
-  (define-xmp-element nil 'xs:|list|    '(:complex (:seq? xs:|annotation|
-							  xs:|simpleType|)))
+  (define-xmp-element nil (xsd "list")    `(:complex (:seq? ,(xsd "annotation")
+							  ,(xsd "simpleType"))))
   )
 
 
 (defmethod xmp-decode-element :around ((conn schema-file-connector)
-				      (elt (eql 'xs:|schema|)) (data t)
+				      (elt (eql (xsd "schema"))) (data t)
 				      &rest options
 				      &key attributes &allow-other-keys)
   (let ((found (schema-collect-target conn attributes)))
@@ -964,23 +1043,24 @@
 
 
 (defmacro define-schema-default-part (pclass elt tag &key (cclass 'schema-component))
+  (or (consp elt) (setf elt (list 'quote elt)))
   `(progn
-     (defmethod schema-make-element ((conn ,pclass) (elt (eql ',elt))
+     (defmethod schema-make-element ((conn ,pclass) (elt (eql ,elt))
 				     &rest keys &key &allow-other-keys)
        (apply #'call-next-method conn elt :tag ',tag :class ',cclass keys))
      (defmethod xmp-complex-content ((conn ,pclass)
-				     (elt (eql ',elt))
+				     (elt (eql ,elt))
 				     data
 				     &rest options &key &allow-other-keys)
        (apply #'call-next-method conn elt data :warn nil options))))
 
-(define-schema-default-part schema-file-connector xs:|schema| :schema)
-(define-schema-default-part
-  schema-file-connector xs:|complexContent| :complex-content)
-(define-schema-default-part schema-file-connector xs:|annotation|
+(define-schema-default-part schema-file-connector (xsd "schema") :schema)
+(define-schema-default-part schema-file-connector (xsd "complexContent")
+  :complex-content)
+(define-schema-default-part schema-file-connector (xsd "annotation")
   :annotation :cclass schema-text-component)
-(define-schema-default-part
-  schema-file-connector xs:|documentation| :documentation :cclass  schema-text-component)
+(define-schema-default-part schema-file-connector (xsd "documentation")
+  :documentation :cclass  schema-text-component)
 
 
 
@@ -1001,28 +1081,62 @@
    value nss))
 
 (defmethod schema-decode-attribute ((conn schema-file-connector)
-				    name value nss &aux attr)
-  (values (setf attr name)
-	  (or (case (intern (string attr) :keyword)
-		((:|base| :|type|)
-		 (xmp-decode-qualified-name conn value nss :suppress-default t))
-		(:|maxOccurs| (if (string-equal "unbounded" value)
-				  most-positive-fixnum
-				(parse-integer value)))
-		(:|minOccurs| (parse-integer value))
-		)
-	      (case attr
-		(otherwise value)))))
+				    name value nss
+				    &aux (attr name)
+				    (attrkey (intern (string attr) :keyword))
+				    attr-loose attr-targeted
+				    )
+  (cond 
+    ((or (when (eq attrkey (xmp-symbol "base" :keyword))
+	   (setf attr-loose 'base-loose attr-targeted 'base-targeted) t)
+	 (when (eq attrkey (xmp-symbol "type" :keyword))
+	   (setf attr-loose 'type-loose attr-targeted 'type-targeted) t))
+     (let* ((strict (xmp-decode-qualified-name conn value nss :suppress-default t))
+	    (not-strict (case (xmp-xml-syntax conn) (:strict nil) (otherwise t)))
+	    (targeted (when not-strict (schema-targeted-name conn value :nss nss)))
+	    (loose (when not-strict 
+		     (xmp-decode-qualified-name conn value nss :suppress-default nil)))
+	    )
+       (values-list (list* attr strict
+			   (when (or (and targeted (not (eq strict targeted)))
+				     (and loose (not (eq strict loose))))
+			     (cond ((eq targeted loose) (list attr-loose loose))
+				   ((null loose) (list attr-targeted targeted))
+				   ((null targeted) (list attr-loose loose))
+				   ((eq strict targeted) (list attr-loose loose))
+				   ((eq strict loose) (list attr-targeted targeted))
+				   (t (list attr-targeted targeted
+					    attr-loose loose))))))
+       ))
+    ((eq attrkey (xmp-symbol "maxOccurs" :keyword))
+     (values attr (if (string-equal "unbounded" value)
+		      most-positive-fixnum
+		    (parse-integer value))))
+    ((eq attrkey (xmp-symbol "minOccurs" :keyword)) (values attr (parse-integer value)))
+    (t (values attr value))
+    ))
 	  
 (defmethod schema-decode-attributes ((conn schema-file-connector)
 				     attributes nss)
   (do ((tail attributes (cddr tail)) res)
-      ((atom tail) (nreverse res))
-    (multiple-value-bind (name val)
-	(schema-decode-attribute conn (first tail) (second tail) nss)
-      (push name res)
-      (push val res))))
+      ((atom tail) res)
+    (setf res (append
+	       (multiple-value-list
+		(schema-decode-attribute conn (first tail) (second tail) nss))
+	       res))))
 
+(defmethod schema-targeted-name ((conn schema-file-connector) tname
+				 &key (nss :in) (suppress-default t))
+  (let* ((name (string tname))
+	 (targets (schema-target conn))
+	 (target (first targets))
+	 (tp (when target (xmp-uri-to-package conn target nss)))
+	 (*package* (resolve-package tp)))
+    (if tp
+	;; if there is a targetNamaspace, set it as default and use it
+	(xmp-decode-qualified-name conn name (cons (list target) nss))
+      ;; otherwise there is no default that applies
+      (xmp-decode-qualified-name conn name nss :suppress-default suppress-default))))
 
 (defmethod schema-name-attr ((conn schema-file-connector)
 			     attributes &optional (qname t))
@@ -1037,15 +1151,7 @@
     (values
      (if (null qname)
 	 name
-       (let* ((targets (schema-target conn))
-	      (target (first targets))
-	      (tp (when target (xmp-uri-to-package conn target :in)))
-	      (*package* (resolve-package tp)))
-	 (if tp
-	     ;; if there is a targetNamaspace, set it as default and use it
-	     (xmp-decode-qualified-name conn name (cons (list target) :in))
-	   ;; otherwise there is no default that applies
-	   (xmp-decode-qualified-name conn name :in :suppress-default t))))
+       (schema-targeted-name conn name))
      (when type
        (xmp-decode-qualified-name conn type :in :suppress-default t))
      (schema-decode-attributes conn attributes :in))))
@@ -1063,9 +1169,10 @@
   ;; cclass   - class of schema component created for this element
   ;; acc      - keep a list of the outer-most instances of this component
   ;;             at this accessor in pclass
+  (or (consp elt) (setf elt (list 'quote elt)))
   `(progn
      (defmethod xmp-begin-element :around ((conn ,pclass) 
-					  (elt (eql ',elt))
+					  (elt (eql ,elt))
 					  &rest options
 					  &key attributes &allow-other-keys)
        (apply #'call-next-method conn elt
@@ -1073,7 +1180,7 @@
 	      (schema-begin-part conn elt ',cclass attributes ',tag ',acc)
 	      options))
      (defmethod xmp-complex-content ((conn ,pclass) 
-				     (elt (eql ',elt)) data
+				     (elt (eql ,elt)) data
 				     &rest options &key &allow-other-keys)
        (pop (schema-context conn))
        (apply #'call-next-method conn elt data :warn nil options)
@@ -1091,6 +1198,7 @@
 			 :schema-component-type type
 			 :schema-element-key key
 			 :schema-element-tag elt
+			 :schema-source conn
 			 ))
     (push part (schema-context conn))
     (or (cdr (schema-context conn))
@@ -1100,15 +1208,15 @@
 
 
 
-(defmethod schema-collected-parts ((comp schema-component) tag &optional key
+(defmethod schema-collected-parts ((comp schema-component) this-key &optional sub-key
 				   &aux
 				   (all (schema-component-content comp))
 				   subset)
-  (or (eq tag  (schema-element-key comp)) 
+  (or (eq this-key  (schema-element-key comp)) 
       (error "Schema component mismatch"))
-  (if key
+  (if sub-key
       (dolist (a all (nreverse subset))
-	(when (eq key (schema-element-key a))
+	(when (eq sub-key (schema-element-key a))
 	  (push a subset)))
     all))
 
@@ -1118,11 +1226,12 @@
 			       (all (schema-component-content comp))
 			       a found)
   ;; look for sub-elements that match key
-  ;;  if more-p is nil, return nil or the only match
+  ;;   key -> string | symbol | (symbol...) | predicate-function
+  ;;   if more-p is nil, return nil or the only match
   ;;            otherwise return list of matches
   ;;   if only-p is nil ignore other elements
-  ;;             otherwise ignore only elements that match ignored
-  ;; if error-p is non-nil, signal error
+  ;;            otherwise ignore only elements that match ignored
+  ;;   if error-p is non-nil, signal error
   ;;               when more-p is nil AND second element found
   ;;               when only-p is t AND element cannot be ignored
   (dolist (one all found)
@@ -1133,41 +1242,48 @@
 	     (otherwise (equal key a)))
 	   (cond (more-p  (push one found))
 		 ((null found) (setf found one))
-		 (error-p (error "Schema component has too many parts"))
-		 (t       (return nil))))
+		 (t (return
+		     (schema-error-p 
+		      nil error-p
+		      "Schema component ~S has too many parts with key ~S"
+		      comp key)))))
 	  ((null only-p))
 	  ((typecase ignored
-	    (null nil)
-	    (cons (member a ignored))
-	    (function (funcall ignored a))
-	    (otherwise (equal ignored a)))
+	     (null nil)
+	     (cons (member a ignored))
+	     (function (funcall ignored a))
+	     (otherwise (equal ignored a)))
 	   )
-	  (error-p (error "Schema component has other parts"))
-	  (t       (return nil)))))
+	  (t (return
+	      (schema-error-p 
+	       nil error-p
+	       "Schema component ~S has parts other than ~S or ~S"
+	       comp key ignored))))))
 	 
 
-(define-schema-collected-part schema-file-connector
-		       xs:|element|     :element      schema-elements)
-(define-schema-collected-part schema-file-connector
-		       xs:|complexType| :complex-type schema-types)
-(define-schema-collected-part schema-file-connector
-		       xs:|simpleType|  :simple-type  schema-types)
-(define-schema-collected-part schema-file-connector
-		       xs:|attribute|   :attribute    schema-attributes)
-(define-schema-collected-part schema-file-connector
-		       xs:|group|       :group        schema-groups)
 (define-schema-collected-part
-  schema-file-connector xs:|attributeGroup| :a-group   schema-a-groups)
+  schema-file-connector (xsd "element")     :element      schema-elements)
 (define-schema-collected-part
-  schema-file-connector xs:|import| :import   schema-imports)
+  schema-file-connector (xsd "complexType") :complex-type schema-types)
 (define-schema-collected-part
-  schema-file-connector xs:|include| :include   schema-imports)
+  schema-file-connector (xsd "simpleType")  :simple-type  schema-types)
+(define-schema-collected-part
+  schema-file-connector (xsd "attribute")   :attribute    schema-attributes)
+(define-schema-collected-part
+  schema-file-connector (xsd "group")       :group        schema-groups)
+(define-schema-collected-part
+  schema-file-connector (xsd "attributeGroup") :a-group   schema-a-groups)
+(define-schema-collected-part
+  schema-file-connector (xsd "import") :import   schema-imports)
+(define-schema-collected-part
+  schema-file-connector (xsd "include") :include   schema-imports)
 
 (defmacro define-schema-nested-part (class elt tag 
 					   &optional (cclass 'schema-component))
+  (or (consp elt) (setf elt (list 'quote elt)))
   `(progn
      (defmethod xmp-begin-element :around ((conn ,class) 
-					  (elt (eql ',elt))
+					  (elt (eql ,elt))
 					  &rest options &key attributes 
 					  &allow-other-keys
 					  &aux part)
@@ -1175,34 +1291,36 @@
 			 :schema-component-raw-attributes attributes
 			 :schema-component-decoded-attributes
 			 (schema-decode-attributes conn attributes :in)
-			 :schema-element-tag ',elt
+			 :schema-element-tag ,elt
 			 :schema-element-key ',tag
+			 :schema-source conn
 			 ))
        (push part (schema-context conn))
        (apply #'call-next-method conn elt :schema-component part options))
      (defmethod xmp-complex-content ((conn ,class) 
-				     (elt (eql ',elt))
+				     (elt (eql ,elt))
 				     data
 				     &rest options &key &allow-other-keys)
        (pop (schema-context conn))
        (apply #'call-next-method conn elt data :warn nil options))))
 
 ;; ??? minOccurs maxOccurs attributes may apply
-;;     xs:|sequence|   min=0  max=Unbounded default=1
-;;     xs:|all|        min=0  max=1         default=1
-;;     xs:|choice|     min=0  max=Unbounded default=1
-(define-schema-nested-part schema-file-connector xs:|sequence| :seq*) 
-(define-schema-nested-part schema-file-connector xs:|all|      :set)
-(define-schema-nested-part schema-file-connector xs:|choice|   :or)
+;;     xs:sequence   min=0  max=Unbounded default=1
+;;     xs:all        min=0  max=1         default=1
+;;     xs:choice     min=0  max=Unbounded default=1
+(define-schema-nested-part schema-file-connector (xsd "sequence") :seq*) 
+(define-schema-nested-part schema-file-connector (xsd "all")      :set)
+(define-schema-nested-part schema-file-connector (xsd "choice")   :or)
 
 
 (defmacro define-schema-named-part (pclass elt tag 
 					   &key 
 					   (class 'schema-named-component)
 					   (qname t))
+  (or (consp elt) (setf elt (list 'quote elt)))
   `(progn
      (defmethod xmp-begin-element :around ((conn ,pclass) 
-					  (elt (eql ',elt))
+					  (elt (eql ,elt))
 					  &rest options &key attributes 
 					  &allow-other-keys
 					  &aux part)
@@ -1214,11 +1332,12 @@
 				   :schema-component-name name
 				   :schema-component-type type
 				   :schema-element-key ',tag
-				   :schema-element-tag ',elt
+				   :schema-element-tag ,elt
+				   :schema-source conn
 				   ))
 	 (apply #'call-next-method conn elt :schema-component part options)))
      (defmethod xmp-complex-content ((conn ,pclass) 
-				     (elt (eql ',elt))
+				     (elt (eql ,elt))
 				     data
 				     &rest options &key &allow-other-keys)
        (apply #'call-next-method conn elt data :warn nil options)
@@ -1228,9 +1347,10 @@
 					    &optional
 					    (cclass 'schema-simple-component)
 					    )
+  (or (consp elt) (setf elt (list 'quote elt)))
   `(progn
      (defmethod xmp-begin-element :around ((conn ,pclass) 
-					  (elt (eql ',elt))
+					  (elt (eql ,elt))
 					  &rest options &key attributes 
 					  &allow-other-keys
 					  &aux part)
@@ -1239,43 +1359,75 @@
 				 :schema-component-decoded-attributes
 				 (schema-decode-attributes conn attributes :in)
 				 :schema-element-key ',tag
-				 :schema-element-tag ',elt
+				 :schema-element-tag ,elt
+				 :schema-source conn
 				 ))
        (apply #'call-next-method conn elt :schema-component part options))
      (defmethod xmp-complex-content ((conn ,pclass) 
-				     (elt (eql ',elt))
+				     (elt (eql ,elt))
 				     (data t)
 				     &rest options &key &allow-other-keys)
        (apply #'call-next-method conn elt data :warn nil options))))
 
 
 (defmacro define-schema-ignored-part (class elt)
+  (or (consp elt) (setf elt (list 'quote elt)))
   `(progn
      (defmethod xmp-begin-element :around ((conn ,class) 
-					   (elt (eql ',elt))
+					   (elt (eql ,elt))
 					   &rest options &key &allow-other-keys)
        (declare (ignore options))
        (xmp-any-cpart conn))
 
      (defmethod xmp-decode-element ((conn ,class) 
-				    (elt (eql ',elt))
+				    (elt (eql ,elt))
 				    (data t)
 				    &rest options &key &allow-other-keys)
        (declare (ignore options))
        nil)))
 
 
-(define-schema-simple-part schema-file-connector xs:|extension|     :extension)
-(define-schema-simple-part schema-file-connector xs:|simpleContent| :simple-content)
-(define-schema-simple-part schema-file-connector xs:|restriction|   :restriction)
-(define-schema-simple-part schema-file-connector xs:|maxLength|     :max-length)
-(define-schema-simple-part schema-file-connector xs:|maxlength|     :max-length)
-(define-schema-simple-part schema-file-connector xs:|pattern|       :pattern)
-(define-schema-simple-part schema-file-connector xs:|any|           :any)
-(define-schema-simple-part schema-file-connector xs:|anyAttribute|  :any-attribute)
-(define-schema-simple-part schema-file-connector xs:|list|          :list)
-(define-schema-simple-part schema-file-connector xs:|enumeration|   :enumeration)
+(define-schema-simple-part schema-file-connector (xsd "extension")     :extension)
+(define-schema-simple-part schema-file-connector (xsd "simpleContent") :simple-content)
+(define-schema-simple-part schema-file-connector (xsd "restriction")   :restriction)
+(define-schema-simple-part schema-file-connector (xsd "maxLength")     :max-length)
+(define-schema-simple-part schema-file-connector (xsd "maxlength")     :max-length)
+(define-schema-simple-part schema-file-connector (xsd "pattern")       :pattern)
+(define-schema-simple-part schema-file-connector (xsd "any")           :any)
+(define-schema-simple-part schema-file-connector (xsd "anyAttribute")  :any-attribute)
+(define-schema-simple-part schema-file-connector (xsd "list")          :list)
+(define-schema-simple-part schema-file-connector (xsd "union")         :union)
+(define-schema-simple-part schema-file-connector (xsd "enumeration")   :enumeration)
+(define-schema-simple-part schema-file-connector (xsd "minInclusive")  :min-inclusive)
+(define-schema-simple-part schema-file-connector (xsd "maxInclusive")  :max-inclusive)
+(define-schema-simple-part schema-file-connector (xsd "minExclusive")  :min-exclusive)
+(define-schema-simple-part schema-file-connector (xsd "maxExclusive")  :max-exclusive)
 
+
+(defmethod schema-base-type ((conn schema-file-connector) ext)
+  (schema-maybe-loose-type conn ext 'base-loose 'base-targeted))
+
+(defmethod schema-maybe-loose-type ((conn schema-file-connector) ext
+				    attr-loose attr-targeted)
+  ;; Return a type-spec or nil
+  (let* ((strict (schema-decoded-attribute ext "base"))
+	 (targeted (schema-decoded-attribute ext attr-targeted))
+	 (loose (schema-decoded-attribute ext attr-loose))
+	 (component 
+	  (or (schema-lookup-type conn strict)
+	      (case (xmp-xml-syntax conn)
+		(:strict nil)
+		(otherwise
+		 (or (schema-lookup-type conn targeted)
+		     (schema-lookup-type conn loose)))))))
+    (if component
+	(schema-parts-to-type component)
+      (or (xmp-find-type conn strict :in)
+	  (case (xmp-xml-syntax conn)
+	    (:strict nil)
+	    (otherwise
+	     (or (xmp-find-type conn targeted :in)
+		 (xmp-find-type conn loose :in))))))))
 
 
 (defmethod schema-lookup-type ((conn schema-file-connector) name)
@@ -1283,6 +1435,9 @@
 
 (defmethod schema-lookup-element ((conn schema-file-connector) name)
   (schema-collected-component conn #'schema-elements #'schema-component-name name))
+
+(defmethod schema-lookup-group ((conn schema-file-connector) name)
+  (schema-collected-component conn #'schema-groups #'schema-component-name name))
 
 
 (define-schema-elements)

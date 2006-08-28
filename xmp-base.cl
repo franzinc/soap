@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-base.cl,v 2.11 2006/01/20 00:40:47 mm Exp $
+;; $Id: xmp-base.cl,v 2.12 2006/08/28 20:27:05 mm Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
@@ -151,11 +151,13 @@
    xmp-trim-whitespace
    xmp-inside-elements
    xmp-normal-element-spec
+   xmp-normal-type-spec 
    xmp-fault-code
    xmp-fault-sub-code
    xmp-fault-string
    xmp-fault-factor
    xmp-fault-detail
+   xmp-xml-syntax
 
    nsd-package
    nsd-prefix
@@ -233,7 +235,8 @@
    xmp-getf-in-part
    xmp-getf-in-def
    xmp-simple-exel
-   xmp-defined-element-defs
+   xmp-defined-element-def
+   xmp-defined-array-def
    xmp-warning-leader
    xmp-match-name
    xmp-getf
@@ -276,6 +279,7 @@
    ;; Macros
    with-tree-match
    def-xmp-sub-classes 
+   xmp-symbol
    
    ;; Variables
    *xmp-server*
@@ -290,6 +294,64 @@
 
 
 (defvar *xmp-debug* nil)
+
+
+;;; Load-time symbol BEGIN
+;;;
+;;; These macros and functions provide a facility for interning 
+;;; fixed-case symbols at load or eval time to allow a case-portable
+;;; fasl file.
+;;; 
+;;; *xmp-symbols* -> #(package-array symbol-array)
+;;; 
+;;; (xmp-symbol name-string pkg)
+;;;       ==> (xmp-symbol-ref name-string 'pkg xx yy)
+;;; 
+;;; The function xmp-symbol-ref interns the name in the package and caches
+;;;  the result in the above vectors.
+
+(eval-when (compile load eval)
+  (defvar *xmp-symbols*
+    ;; There will be a compile-time error if we run out of space in these tables
+    (vector (make-array 20) (make-array 1000))
+    )
+  (defun xmp-symbol-ref (name pk-name pk-index name-index
+			      &aux
+			      (both *xmp-symbols*)
+			      (svec (svref both 1))
+			      )
+    (or (svref svec name-index)
+	(let* ((pvec (svref both 0))
+	       (pksv (svref pvec pk-index))
+	       (pk (or pksv (find-package pk-name) (error "Cannot find ~S" pk-name)))
+	       new)
+	  (or pksv (setf (svref pvec pk-index) pk))
+	  (setf (svref svec name-index) (setf new (intern name pk)))
+	  new)))
+  )
+
+(defmacro xmp-symbol (name package)
+  (let* ((packages (svref *xmp-symbols* 0))
+	 (symbols  (svref *xmp-symbols* 1))
+	 (pk (or (find-package package) (error "not a package")))
+	 (sym (intern name pk))
+	 (px (dotimes (i (length packages)
+			 (error "increase package array in *xmp-symbols*"))
+	       (cond ((eq pk (aref packages i)) (return i))
+		     ((null (aref packages i))
+		      (setf (aref packages i) pk)
+		      (return i)))))
+	 (sx (dotimes (i (length symbols)
+			 (error "increase symbol array in *xmp-symbols*"))
+	       (cond ((eq sym (aref symbols i)) (return i))
+		     ((null (aref symbols i))
+		      (setf (aref symbols i) sym)
+		      (return i))))))
+    `(xmp-symbol-ref ,name ',package ,px ,sx)))
+
+	 
+;;; Load-time symbol END
+
 
 
 ;;; composite class names:  xml-protocol-transport-role-sendstyle-receivestyle-connector
@@ -418,7 +480,8 @@
 		 ;; values -> :aserve
 		 :allocation :class)
 
-    (string-type :reader xmp-string-type :initform :|string| :allocation :class)
+    (string-type :reader xmp-string-type :initform (xmp-symbol "string" :keyword)
+		 :allocation :class)
 
 
    ;;; INSTANCE SLOTS COPIED by xmp-copy
@@ -576,10 +639,10 @@
 (defgeneric xmp-message-send (conn &key &allow-other-keys))
 
 
-(defmethod xmp-copy ((object xmp-connector))
+(defmethod xmp-copy ((object xmp-connector) &optional destination)
   (let* ((class (class-of object))
 	 (slots (mop:compute-slots class))
-	 (new (make-instance class))
+	 (new (or destination (make-instance class)))
 	 name alloc)
     (dolist (slot slots)
       (setf name (mop:slot-definition-name slot))
@@ -713,7 +776,7 @@
 (defmethod xmp-decode-body ((conn xmp-string-in-connector) data-list
 			    &rest options &key &allow-other-keys
 			    &aux content-list type-list
-			    trim cdi exel
+			    trim cdi exel simple
 			    (strt (xmp-string-type conn))
 			    )
   (declare (ignore options))
@@ -743,71 +806,83 @@
 		  (t (setf content-list (nconc content-list (list (first res))))
 		     (push (second res) type-list))
 		  ))))
-  (loop
-   (let (data elt attr type vals simple)
-     (when (null data-list)
-       (when (and cdi (eq :incomplete (xmp-cdi-state cdi)))
-	 (xmp-error conn :client 
-		    :string (list "Expected: ~S  Found only: ~S" 
-				  (xmp-cdi-def cdi) (xmp-cdi-found cdi))))
-       (return))
-     ;; data is a single element
-     (setf data (pop data-list))
-     (multiple-value-setq (elt attr) (xmp-element-parts conn data))
+    (cond
+     ((and (null data-list)
+	   exel (atom exel) (setf simple exel)
+	   #+ignore
+	   (when exel (if (atom exel)
+			  (setf simple exel)
+			(when (xmp-any-cpart conn exel) (setf simple strt)))))
+      ;; Make sure that xmp-simple-content gets called for empty elements.
+      (collect-simple simple nil))
+     (t
+      (loop
+       (let (data elt attr type vals)
+	 (when (null data-list)
+	   (when (and cdi (eq :incomplete (xmp-cdi-state cdi)))
+	     (xmp-error conn :client 
+			:string (list "Expected: ~S  Found only: ~S" 
+				      (xmp-cdi-def cdi) (xmp-cdi-found cdi))))
+	   (return))
+	 ;; data is a single element
+	 (when (consp data-list)
+	   (setf data (pop data-list))
+	   (multiple-value-setq (elt attr) (xmp-element-parts conn data)))
 
-     (cond 
-      ((and elt (null (cdr data)) (xmp-nillable-p conn elt attr)))
-      ((and elt (or cdi (xmp-any-cpart conn exel)))
-       (cond ((if cdi (xmp-test-complex-def conn cdi elt) t)
+	 (cond 
+	  ((and elt (null (cdr data)) (xmp-nillable-p conn elt attr)))
+	  ((and elt (or cdi (xmp-any-cpart conn exel)))
+	   (cond ((if cdi (xmp-test-complex-def conn cdi elt) t)
 
-		;; Update the context first, then get the expected elements
-		(push (cons elt attr) (xmp-inside-elements conn))
-		(xmp-update-prefix-map conn attr)
+		  ;; Update the context first, then get the expected elements
+		  (push (cons elt attr) (xmp-inside-elements conn))
+		  (xmp-update-prefix-map conn attr)
 
-		(push (xmp-new-complex-def
-		       conn (xmp-begin-element conn elt :attributes attr))
-		      (xmp-expected-elements conn))
+		  (push (xmp-new-complex-def
+			 conn (xmp-begin-element conn elt :attributes attr))
+			(xmp-expected-elements conn))
 
-		(multiple-value-setq (vals type)
-		  (xmp-decode-element conn elt data :attributes attr))
-		(xmp-note-attributes conn vals attr)
-		(xmp-end-element conn elt)
-		(pop (xmp-inside-elements conn))
-		(pop (xmp-expected-elements conn))
+		  (multiple-value-setq (vals type)
+		    (xmp-decode-element conn elt data :attributes attr))
+		  (xmp-note-attributes conn vals attr)
+		  (xmp-end-element conn elt)
+		  (pop (xmp-inside-elements conn))
+		  (pop (xmp-expected-elements conn))
 
-		(when cdi (xmp-step-complex-def conn cdi elt))
+		  (when cdi (xmp-step-complex-def conn cdi elt))
 
-		(when vals (setf content-list (nconc content-list vals))
-		      (when type (push type type-list))))
-	     (cdi  ;;; [bug15502] refine the error message
-	      (xmp-error conn :client 
-			 :string (list "Expected: ~S  Found: ~S" 
-				       (xmp-cdi-def cdi)
-				       (append (xmp-cdi-found cdi) (list elt)))))
-	     ((and (stringp data) trim 
-		   (when (equal "" (string-trim trim data))
-		     (setf data nil)
-		     t))
-	      (when data (collect-simple (setf simple strt) data)))
-	     (t (xmp-error
-		 conn :client 
-		 :string (list "Non-blank string data in complex context ~S" data)))
-	     ))
-      ((and (or cdi (xmp-any-cpart conn exel))
-	    (stringp data) trim (equal "" (string-trim trim data))))
-      ((and (stringp data)
-	    (when exel (if (atom exel)
-			   (setf simple exel)
-			 (when (xmp-any-cpart conn exel) (setf simple strt)))))
-       ;; collect all the string data into one string
-       (loop (let ((d (first data-list)))
-	       (or (stringp d) (return))
-	       (setf data (concatenate 'string data d))
-	       (pop data-list)))
-       (collect-simple simple data))
-      (t (xmp-error conn :client :string (list "Expected: ~S  Found content: ~S" 
-					       exel data))))))
-  )
+		  (when vals (setf content-list (nconc content-list vals))
+			(when type (push type type-list))))
+		 (cdi  ;;; [bug15502] refine the error message
+		  (xmp-error conn :client 
+			     :string (list "Expected: ~S  Found: ~S" 
+					   (xmp-cdi-def cdi)
+					   (append (xmp-cdi-found cdi) (list elt)))))
+		 ((and (stringp data) trim 
+		       (when (equal "" (string-trim trim data))
+			 (setf data nil)
+			 t))
+		  (when data (collect-simple (setf simple strt) data)))
+		 (t (xmp-error
+		     conn :client 
+		     :string (list "Non-blank string data in complex context ~S" data)))
+		 ))
+	  ((and (or cdi (xmp-any-cpart conn exel))
+		(stringp data) trim (equal "" (string-trim trim data))))
+	  ((and (or (null data) (stringp data))
+		(when exel (if (atom exel)
+			       (setf simple exel)
+			     (when (xmp-any-cpart conn exel) (setf simple strt)))))
+	   (when data
+	     ;; collect all the string data into one string
+	     (loop (let ((d (first data-list)))
+		     (or (stringp d) (return))
+		     (setf data (concatenate 'string data d))
+		     (pop data-list))))
+	   (collect-simple simple data))
+	  (t (xmp-error conn :client :string (list "Expected: ~S  Found content: ~S" 
+						   exel data))))))
+      )))
   (values content-list (nreverse type-list))
 
   )
@@ -868,35 +943,56 @@
 
 
 
-(defmethod xmp-defined-element-defs ((conn t) elt nss depth &aux edef prev dn tn ex ad)
-  ;; return 4 values: expected-element type-name defined-p array-def
-  (when (setf 
-	 edef
-	 (or (typecase conn
-	       (xmp-connector
-		(typecase (setf prev
-				(ecase depth
-				  (0 (first (xmp-expected-elements conn)))
-				  (1 (second (xmp-expected-elements conn)))))
-		  (xmp-complex-def-instance 
-		   (xmp-cdi-inner prev))))
-	       (otherwise nil))
-	     (xmp-find-element conn elt nss)))
-    (setf dn elt))
+(defmethod xmp-defined-element-def ((conn t) elt nss depth
+				     &aux edef defined-p type-name exel)
+  ;; return 3 values:
+  ;;    expected-element = nil or a collector
+  ;;    type-name        = nil or element (when exel is nil) or type name
+  ;;    defined-p        = nil or elt
+  (when (setf edef (xmp-defined-element-p conn elt nss depth))
+    (setf defined-p elt))
   (typecase edef
     ((member nil) nil)
     (cons (ecase (first edef)
-	    (:element (multiple-value-setq (ex tn ad) (xmp-element-exdef conn edef nss)))
-	    (:complex (setf ex (second edef)))
-	    (:array (setf ad edef ex `(:seq* (:element nil ,(second edef)))))
-	    (:simple (or (setf ex (second edef))
-			 (setf ex (xmp-simple-exel conn edef)))))))
-  (values ex tn dn ad))
+	    (:element (multiple-value-setq (exel type-name)
+			(xmp-element-exdef conn edef nss)))
+	    (:complex (setf exel (second edef)))
+	    (:array (setf exel `(:seq* (:element nil ,(second edef)))))
+	    (:simple (or (setf exel (second edef))
+			 (setf exel (xmp-simple-exel conn edef))))))
+    (symbol (multiple-value-setq (exel type-name)
+	      (xmp-element-exdef conn edef nss)))
+    )
+  (values exel type-name defined-p))
+
+(defmethod xmp-defined-array-def ((conn t) elt nss depth &aux edef)
+  (typecase (setf edef (xmp-defined-element-p conn elt nss depth))
+    ((member nil) nil)
+    (cons (ecase (first edef)
+	    (:element (nth-value 2
+			(xmp-element-exdef conn edef nss)))
+	    (:complex nil)
+	    (:array edef)
+	    (:simple nil)))))
+
+(defmethod xmp-defined-element-p ((conn xmp-connector) (elt t) (nss t) depth
+				  &aux prev)
+  (or (typecase (setf prev
+		      (ecase depth
+			(0 (first (xmp-expected-elements conn)))
+			(1 (second (xmp-expected-elements conn)))))
+	(xmp-complex-def-instance (xmp-cdi-inner prev)))
+      (call-next-method)))
+
+(defmethod xmp-defined-element-p ((conn t) elt nss (depth t))
+  (xmp-find-element conn elt nss))
+
+
 
 (defmethod xmp-begin-element ((conn xmp-string-in-connector) (elt t)
 			      &rest options &key &allow-other-keys)
   (declare (ignore options))
-  (or (xmp-defined-element-defs conn elt :in 0)
+  (or (xmp-defined-element-def conn elt :in 0)
       ;; The default is to accept anything
       (xmp-any-cpart conn)))
 
@@ -1004,10 +1100,13 @@
 	   (xmp-error conn :client :string (list "Expected: ~S  Found simple string: ~S" 
 						 def data)))
 	  ))))
-			 
-   ;; default content is the parsed XML string content
-   ;;(format t "~&;;xmp-simple-content ~S~%" elt)
-   (list elt data)))
+	
+   (if (null data)
+       ;; Null data can only mean an empty element.
+       (list elt)
+     ;; default content is the parsed XML string content
+     ;;(format t "~&;;xmp-simple-content ~S~%" elt)
+     (list elt data))))
 
 (defmethod xmp-complex-content :around ((conn xmp-string-in-connector) 
 					(elt t) (data t) &rest options 
@@ -1848,11 +1947,13 @@
     (when (setf e (xmp-search-map nse :uri uri))
       (return (nsd-prefix e)))))
 
-(defmethod xmp-prefix-to-package ((conn t) prefix nss &key suppress-default 
+(defmethod xmp-prefix-to-package ((conn t) prefix nss &key suppress-default
 				  &aux e d)
   (setf nss (xmp-translate-nss conn nss))
   (when (equal prefix "") (setf prefix nil))
-  (dolist (nse nss)
+  (dolist (nse nss nil)
+    ;; Never search for a prefix outside the context of XML document.
+    (when (xmp-initial-nss-marker nse) (return nil))
     (if (null prefix)
 	(if suppress-default 
 	    (return nil)
@@ -2173,10 +2274,12 @@
 				       (otherwise x))))
 				 uri))))))
 
+(defvar *xmp-initial-nss-marker* (xmp-define-namespace-map nil nil nil))
+(defmethod xmp-initial-nss-marker (nse) (eq nse  *xmp-initial-nss-marker*))
 (defmethod xmp-initial-nss ((conn xmp-connector) namespaces)
   (let* ((dns (xmp-normal-nse (xmp-message-dns conn)))
 	 (base (xmp-normal-nse (xmp-base-dns conn))))
-    (list (xmp-normal-nse namespaces) dns base)))
+    (list *xmp-initial-nss-marker* (xmp-normal-nse namespaces) dns base)))
 
 (defmethod xmp-parse-message ((conn xmp-connector) source &key namespaces) 
   (let* ((nss (xmp-initial-nss conn namespaces))
@@ -2217,6 +2320,7 @@
 (defun encode-base64-string (arg &aux 
 				 (string (typecase arg
 					   (string arg)
+					   (array arg)
 					   (otherwise (format nil "~A" arg))))
 				 (len (length string)) 
 				 out)
@@ -2234,7 +2338,10 @@
     (dotimes (j 3)
       (setf k (+ i j))
       (if (< k len)
-	  (setf int (+ (ash int 8) (char-int (elt string k))))))
+	  (setf int (+ (ash int 8)
+		       (typecase string
+			 (string (char-int (elt string k)))
+			 (array (logand #xff (truncate (aref string k)))))))))
     (setf res (excl::integer-to-base64-string int 48))
     (dotimes (n 4)
       (setf (elt out (+ d n)) (elt res (+ 4 n))))))
@@ -2245,7 +2352,7 @@
        int res j k p s
        )
       ((<= len i)
-       (concatenate 'string (nreverse res)))
+       (concatenate '(array (unsigned-byte 8)) (nreverse res)))
     (setf j i k 0 p 0)
     (loop 
      (when (or (eql k 4) (eql j len) (eql p 2)) (return))
@@ -2273,12 +2380,12 @@
       (0 nil)
       (otherwise (setf int (excl::base64-string-to-integer s))
 		 (case p
-		   (2 (push (code-char (logand #xff int)) res))
-		   (1 (push (code-char (ash (logand #xff00 int) -8)) res)
-		      (push (code-char (logand #xff int)) res))
-		   (0 (push (code-char (ash (logand #xff0000 int) -16)) res)
-		      (push (code-char (ash (logand #xff00 int) -8)) res)
-		      (push (code-char (logand #xff int)) res)))))
+		   (2 (push (logand #xff int) res))
+		   (1 (push (ash (logand #xff00 int) -8) res)
+		      (push (logand #xff int) res))
+		   (0 (push (ash (logand #xff0000 int) -16) res)
+		      (push (ash (logand #xff00 int) -8) res)
+		      (push (logand #xff int) res)))))
     ))
 
 
@@ -2351,7 +2458,8 @@
 		       ;;  in the same order as exports
 		       (nconc item (list (setf entry (list sig)))))))
      
-     ;; table-entry -> (sig return-type lisp-name enabled help-string . properties)
+     ;; export-table-entry
+     ;;   -> (sig return-type lisp-name enabled help-string . properties)
 
      (setf (cdr entry) (list* (xmp-normal-element-spec conn return :dns)
 			      (or lisp-name (intern name))
@@ -2390,7 +2498,8 @@
 
 (defmethod xmp-accept-method ((conn xmp-server-connector) name sig (args t))
   ;; return zero values if method is not accepted
-  ;; return two values - lisp-name and return-type - if accepted
+  ;; return three values if accepted
+  ;;        - lisp-name, return-type, and (possibly modified) arglist
   (mp:with-process-lock 
    ((xmp-server-lock conn))
    (let* ((table (xmp-server-exports conn))
@@ -2398,7 +2507,25 @@
 	  (item (xmp-lookup table name name nil))
 	  (entry (assoc sig item :test sig=)))
      (if (and entry (fourth entry))
-	 (values (third entry) (second entry))
+	 (let* ((ldef (third entry))
+		(lname (if (consp ldef)
+			   (first ldef)
+			 ldef))
+		(keys (when (consp ldef) (cdr ldef)))
+		(ret (second entry))
+		(elts (cddr (first entry)))
+		)
+	   (when keys   ;;; [bug16269]
+	     (do ((tl args (cddr tl)) arg r)
+		 ((atom tl) (setf args (reverse r)))
+	       (setf arg (string (first tl)))
+	       (block match
+		 (mapc #'(lambda (key elt)
+			   (when (xmp-match-name conn arg elt)
+			     (push key r) (push (second tl) r) (return-from match)))
+		       keys elts))
+	       ))
+	   (values lname ret args))
        (values)))))
 
 (defmethod xmp-list-methods ((conn xmp-server-connector))
@@ -2446,7 +2573,7 @@
 (defmethod xmp-invoke-method ((server xmp-server-connector) name args)
   (apply name args))
 
-(defmethod xmp-struct-type ((conn t)) :|struct|)
+(defmethod xmp-struct-type ((conn t)) (xmp-symbol "struct" :keyword))
 
 (defmethod xmp-slot-value ((conn t) (struct cons) member)
   (if (eq (xmp-struct-type conn) (car struct))
@@ -2839,13 +2966,14 @@
 	     (typecase pattern
 	       (string (match target pattern ignore-case))
 	       (symbol (eq target pattern))
-	       (cons (if (and (eq :any-case (first pattern))
-			      (stringp (second pattern))
-			      (null (cddr pattern)))
-			 (match target (second pattern) t)
-		       (dolist (pat pattern nil)
-			 (when (match target pat ignore-case)
-			   (return t))))))))))
+	       (cons (cond ((equal pattern '(:any)) t)
+			   ((and (eq :any-case (first pattern))
+				 (stringp (second pattern))
+				 (null (cddr pattern)))
+			    (match target (second pattern) t))
+			   (t (dolist (pat pattern nil)
+				(when (match target pat ignore-case)
+				  (return t)))))))))))
 	       
 (defmethod xmp-match-element-def ((conn t) cdi eldef elt &aux type)
   (setf (xmp-cdi-inner cdi) nil)
@@ -2882,25 +3010,25 @@
 (defmethod xmp-element-exdef ((conn t) eldef nss &aux ex tp td ar)
   ;; return three values:   
   ;;        - expected-element
-  ;;        - the last element name or type name in the chain
-  ;;           leading up to expected-element
-  ;;        - an array spec
+  ;;        - the input element name 
+  ;;              or the last type name in the chain
+  ;;                     leading up to expected-element
+  ;;        - an array spec if inside an array
   (typecase eldef
     ((member nil) nil)
     ((or string symbol)
-     (cond ((null (setf td (xmp-find-type conn eldef nss)))
-	    (values nil eldef))
-	   (t (multiple-value-setq (ex tp ar)
-		(xmp-element-exdef conn td nss))
-	      (values ex (or tp eldef) ar))))
+     (cond ((setf td (xmp-find-type conn eldef nss))
+	    (multiple-value-setq (ex tp ar)
+	      (xmp-element-exdef conn td nss))
+	    (values ex (or tp eldef) ar))
+	   (t (values nil eldef))))
     (cons (case (first eldef)
 	    (:element (xmp-element-exdef conn (third eldef) nss))
 	    (:simple 
-	     (or (multiple-value-setq (ex tp) 
-		   (xmp-element-exdef conn (second eldef) nss))
-		 (multiple-value-setq (ex tp) 
-		   (values (xmp-simple-exel conn eldef) nil))
-		 )
+	     (multiple-value-setq (ex tp) 
+	       (xmp-element-exdef conn (second eldef) nss))
+	     (or ex
+		 (setq ex (xmp-simple-exel conn eldef) tp nil))
 	     (values ex tp))
 	    (:complex (second eldef))
 	    (:array (values `(:seq* (:element nil ,(second eldef))) nil eldef))
@@ -2925,8 +3053,28 @@
 
   (if name4
       (cond (delete (remhash name4 (elt table 3)))
-	    (v-p (setf (gethash name4 (elt table 3)) value))
-	    (t (gethash name4 (elt table 3))))
+	    (t (let* ((old (gethash name4 (elt table 3)))
+		      (tlist (and (consp old) (eq :type (car old)))))
+		 (when v-p
+		   (if tlist
+		       (setf (second old) value)
+		     (setf (gethash name4 (elt table 3)) (setf old value))))
+		 (cond ((consp attributes)
+			(cond (tlist (setf (cddr old) attributes))
+			      ((consp old) (error "Adding attributes to type"))
+			      (t (setf (gethash name4 (elt table 3))
+				       (list* :type old attributes)))))
+		       ((eq attributes :query))
+		       ((and a-p (null attributes) tlist)
+			(setf (gethash name4 (elt table 3)) (second old))))
+		 (cond (v-p value)
+		       ((eq attributes :query) (when tlist (cddr old)))
+		       (a-p attributes)
+		       (attribute (if tlist
+				      (getf (cddr old) attribute default)
+				    default))
+		       (tlist (second old))
+		       (t old)))))
     (let ()
       (or (when (and dname (symbolp dname))
 	    (setf item (gethash (setf key dname) (setf ht (elt table 0)) not))
@@ -2951,7 +3099,8 @@
       (setf idef item)
       (and found (consp item) (eq :element (first item))
 	   (setf idef (third item) edef item plist (cdddr item)))
-      (cond ((and (null v-p) (null a-p) (null delete))
+      (cond (delete)		      
+	    ((and (null v-p) (null a-p))
 	     (cond ((null attribute) nil)
 		   ((or (atom attribute)
 			(and (consp attribute) (eq :any-case (first attribute))))
@@ -2979,13 +3128,12 @@
 				   value (list :element (list key) item
 					       (first attribute) (second attribute))))))
 		   (t (error "Ill-formed attribute ~S" attribute))))
-	    ((and (null v-p) (null delete) (eq attributes :query))
+	    ((and (null v-p) (eq attributes :query))
 	     (setf idef (when edef plist)))
-	    ((and (null v-p) (null delete) a-p (null attributes))
+	    ((and (null v-p) a-p (null attributes))
 	     (if edef
 		 (setf (cdddr edef) nil plist nil idef nil)
 	       (setf idef nil)))
-	    (delete)		      
 	    (v-p (when not-found
 		   (cond ((and dname (symbolp dname))
 			  (setf ht (elt table 0) key dname))
@@ -3040,17 +3188,22 @@
 				 &key &allow-other-keys)
   (etypecase type-spec
     ((member nil) nil)
-    ((or string symbol) (xmp-decode-qualified-name conn type-spec nss))
+    ((or string symbol)
+     (xmp-decode-qualified-name conn type-spec nss))
     (cons (ecase (first type-spec)
-	    (:simple (etypecase (second type-spec)
-		       ((or string symbol)
-			(xmp-list*
-			 type-spec
-			 (first type-spec)
-			 (xmp-decode-qualified-name
-			  conn (second type-spec) nss)
-			 (apply 'xmp-normal-options
-				conn :type-spec (cddr type-spec) nss options)))))
+	    (:simple (let ((tdef (second type-spec)))
+		       (if (typecase tdef
+			     ((member nil)
+			      (getf (cddr type-spec) :simple-content-key))
+			     ((or string symbol) t))
+			   (xmp-list*
+			    type-spec
+			    (first type-spec)
+			    (when tdef (xmp-decode-qualified-name
+					conn tdef nss))
+			    (apply 'xmp-normal-options
+				   conn :type-spec (cddr type-spec) nss options))
+			 (error "Ill-formed type-spec ~S" type-spec))))
 	    (:array (xmp-list* 
 		     type-spec
 		     (first type-spec)
@@ -3174,15 +3327,15 @@
 
 
 (defmethod define-xmp-type ((conn t) name type-spec &rest options
-			       &key (redef :warn) (nss :dns)
-			       &allow-other-keys
-			       &aux
-			       (dname (xmp-decode-qualified-name conn name nss))
-			       (odef
-				(xmp-lookup *defined-xmp-elements* nil nil dname))
-			       (tdef
-				(apply 'xmp-normal-type-spec conn type-spec nss options))
-			       )
+			    &key (redef :warn) (nss :dns)
+			    &allow-other-keys
+			    &aux
+			    (dname (xmp-decode-qualified-name conn name nss))
+			    (odef
+			     (xmp-lookup *defined-xmp-elements* nil nil dname))
+			    (tdef
+			     (apply 'xmp-normal-type-spec conn type-spec nss options))
+			    r)
   (when (and odef (not (equal odef tdef)))
     (case redef
       (:warn (xmp-class-warning
@@ -3192,25 +3345,36 @@
       (otherwise
        (xmp-error conn :def
 		  (list "redefining ~A type ~S" (xmp-warning-leader conn) dname)))))
-  (xmp-lookup *defined-xmp-elements* nil nil dname
-	      :value
-	      (when type-spec 
-		(apply 'xmp-normal-type-spec conn type-spec nss options))
-	      :delete (null type-spec)))
+  (setf r
+	(xmp-lookup *defined-xmp-elements* nil nil dname
+		    :value
+		    (when type-spec 
+		      (apply 'xmp-normal-type-spec conn type-spec nss options))
+		    :attributes 
+		    (do ((tl options (cddr tl)) res)
+			((atom tl) (reverse res))
+		      (case (first tl)
+			((:nss :redef) nil)
+			;; save any other kw args as attribute specs
+			(otherwise (push (first tl) res)
+				   (push (second tl) res))))
+		    :delete (null type-spec)))
+  (if (null type-spec) r dname))
 
 (defmethod define-xmp-element ((conn t) names type-spec &rest options
-			       &key (redef :warn) (nss :dns) nillable
-			       &allow-other-keys)
+			       &key (redef :warn) (nss :dns)
+			       &allow-other-keys &aux r d)
   (if (and (consp names) (not (eq :any-case (car names))))
-      (mapcar #'(lambda (name)
-		  (apply 'define-xmp-element conn name type-spec options))
-	      names)
+      (progn (mapcar #'(lambda (name)
+			 (setf r (apply 'define-xmp-element
+					conn name type-spec options)))
+		     names)
+	     r)
     (let* ((dname names)
 	   (table *defined-xmp-elements*)
 	   odef oname oany
 	   (tdef (when type-spec 
-		   (apply 'xmp-normal-type-spec conn type-spec nss options)))
-	   )
+		   (apply 'xmp-normal-type-spec conn type-spec nss options))))
       (multiple-value-setq (odef oname oany) (xmp-lookup table dname dname nil))
 
       (when (and odef tdef (not (equal odef tdef)))
@@ -3223,17 +3387,25 @@
 	   (xmp-error conn :def
 		      (list "redefining ~A element ~S"
 			    (xmp-warning-leader conn) dname)))))
-      (xmp-lookup table
-		  (or oname dname) 
-		  (if oname
-		      (if oany
-			  (list :any-case oname)
-			oname)
-		    dname)
-		  nil
-		  :attributes (when nillable (list :nillable t))
-		  :delete (null type-spec)
-		  :value tdef))))
+      (setf r (xmp-lookup table
+			  (or oname dname) 
+			  (setf d (if oname
+				      (if oany
+					  (list :any-case oname)
+					oname)
+				    dname))
+			  nil
+			  :attributes 
+			  (do ((tl options (cddr tl)) res)
+			      ((atom tl) (reverse res))
+			    (case (first tl)
+			      ((:nss :redef) nil)
+			      ;; save any other kw args as attribute specs
+			      (otherwise (push (first tl) res)
+					 (push (second tl) res))))
+			  :delete (null type-spec)
+			  :value tdef))
+      (if (null type-spec) r d))))
 
 (defmethod xmp-getf-in-part ((conn t) part name &optional default)
   (getf (typecase part
@@ -3243,8 +3415,8 @@
 	  (otherwise nil))
 	name default))
 
-(defmethod xmp-getf-in-def ((conn t) part name &optional default
-			    &aux idef v def adef bdef (not-found (list nil)))
+(defmethod xmp-getf-in-def ((conn t) part name &optional default (nss :dns)
+			    &aux idef v def (not-found (list nil)))
   (typecase part
     (cons (case (first part)
 	    (:element
@@ -3253,33 +3425,47 @@
 	     (setf def (third part))
 	     ;;    and look in the immediate element options first
 	     (setf idef (cdddr part)))
-	    (otherwise
-	     ;; Look only in the immediate type def options
-	     (setf idef (cddr part)))))
+	    (:simple
+	     (setf def (second part))
+	     (setf idef (cddr part)))
+	    (otherwise 
+	     ;; this is the end of a chain of definitions
+	     (setf idef (cddr part)))
+	    ))
     (null nil)
     (otherwise
-     ;; Element is specified by name, look for the definition
-     (typecase (setf idef (xmp-find-element conn part :dns))
-       (cons 
-	;; The element is defined by an explicit type def,
-	;;     look only in the immediate options
-	(setf idef (cddr idef)))
-       (null nil)
-       (otherwise 
-	;; The element is defined by a named type
-	;;     follow the type def chain
-	(setf def idef idef nil)))))
+     ;; Element or type is specified by name, look for the definition
+     (when (cond ((setf idef (xmp-find-element conn part nss))
+		  (or (eq not-found 
+			  (setf v (xmp-lookup
+				   *defined-xmp-elements* part part nil
+				   :attribute name :default not-found)))
+		      (return-from xmp-getf-in-def v))
+		  t)
+		 ((setf idef (xmp-find-type conn part nss))
+		  (or (eq not-found 
+			  (setf v (xmp-lookup
+				   *defined-xmp-elements* nil nil part
+				   :attribute name :default not-found)))
+		      (return-from xmp-getf-in-def v))
+		  t))
+       (typecase idef
+	 (cons 
+	  ;; The element is defined by an explicit type def,
+	  (case (first idef) (:simple (setf def (second idef))))
+	  (setf idef (cddr idef)))
+	 (null nil)
+	 (otherwise 
+	  ;; The element is defined by a named type
+	  ;;     follow the type def chain
+	  (setf def idef idef nil)))
+       t)
+     ))
   (cond
    ((not (eq not-found (setf v (getf idef name not-found)))) v)
-   ((consp def) (xmp-getf-in-part conn def name default))
-   ((null (setf adef def)) default)
-   ((loop (when (consp (setf bdef (xmp-find-type conn adef :dns)))
-	    (return t))
-	  (when (or (null bdef) (eq adef bdef))
-	    (return nil))
-	  (setf adef bdef))
-    (xmp-getf-in-part conn bdef name default))
-   (t default)))
+   (def (xmp-getf-in-def conn def name default))
+   (t default)
+   ))
 		      
 
 (defun xmp-new-environment ()

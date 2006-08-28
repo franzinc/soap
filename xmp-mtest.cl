@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-mtest.cl,v 2.1 2005/11/22 00:48:04 mm Exp $
+;; $Id: xmp-mtest.cl,v 2.2 2006/08/28 20:27:06 mm Exp $
 
 ;; Test cases for XML decoder
 
@@ -60,12 +60,16 @@
 				&rest options &key &allow-other-keys
 				)
   (values (list (cons elt data)) elt))
+
 (defmethod xmp-simple-content :around ((conn test-decoder-conn) 
 				       (elt t) (data t)
 				       &rest options &key &allow-other-keys)
   (declare (ignore options))
   (let ((v (multiple-value-list (call-next-method))))
-    (cond ((and (consp v) (consp (first v))) (values (second (first v)) (second v)))
+    (cond ((and (consp v) (consp (first v)))
+	   (if (cdr (first v))
+	       (values (second (first v)) (second v))
+	     (values)))
 	  (t (values-list v)))))
 
 
@@ -98,18 +102,23 @@
 		    (cons   (format nil "</~A>" (first (first p)))))
 		  ))))
 	   
-(defun one-decoder-test (data &key syntax)
+(defun one-decoder-test (data &key syntax verbose &aux in)
+  (setf in (apply 'make-decoder-test-string data))
+  (when verbose (format t "~&;one-decoder-test ~S ~S~%" data in))
   (multiple-value-bind (v e)
       (xmp-decode-string (make-instance 'test-decoder-conn :first (first data)
 					:xml-syntax syntax
 					)
 			 (apply 'make-decoder-test-string data))
+    (test data (first v) :test #'equal :fail-info data)
     (values (equal (first v) data)
 	    v e data)))
 
-(defun err-decoder-test (data &key syntax)
+(defun err-decoder-test (data &key syntax verbose)
   (multiple-value-bind (v e)
-       (ignore-errors (multiple-value-list (one-decoder-test data :syntax syntax)))
+       (ignore-errors
+	 (multiple-value-list
+	  (one-decoder-test data :syntax syntax :verbose verbose)))
      (if e
 	 (values (format nil "~A" e) e v)
        (values-list (list* nil v)))))
@@ -145,7 +154,7 @@
 	 ;;  :evas  skip  eval
 	 ;;  :errs  skip  err
 	 (let ((res (multiple-value-list
-		     (apply 'test-decoder-one errorp syntax i test-case))))
+		     (apply 'test-decoder-one errorp syntax i verbose test-case))))
 	   (cond ((null res))
 		 ((null (first res))
 		  (when i
@@ -161,7 +170,7 @@
 		  (format t "~&;test-decoder-all ~A:     ~S~%"
 			  (first test-case) (second res))))))))))
 
-(defun test-decoder-one (errorp syntax i key kind data &aux errtest)
+(defun test-decoder-one (errorp syntax i verbose key kind data &aux errtest)
   (cond ((and i (not (eql i key))) (values))
 	((ecase kind
 	   (:eval (case syntax (:strict nil) (otherwise t)))
@@ -172,9 +181,9 @@
 	   (:errs (case syntax (:strict (setf errtest t) t))))
 	 (cond (errorp   (with-simple-restart
 			  (:continue-tests "Continue testing")
-			  (one-decoder-test data :syntax syntax)))
-	       (errtest  (err-decoder-test data :syntax syntax))
-	       (t        (one-decoder-test data :syntax syntax)))
+			  (one-decoder-test data :verbose verbose :syntax syntax)))
+	       (errtest  (err-decoder-test data :verbose verbose :syntax syntax))
+	       (t        (one-decoder-test data :verbose verbose :syntax syntax)))
 	 )
 	(t (values))))
 
