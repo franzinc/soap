@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.5 2006/06/22 13:39:12 layer Exp $
+# $Id: Makefile,v 2.6 2006/09/12 21:35:21 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -35,41 +35,24 @@ DIST: FORCE
 	      DIST/examples \
 	      DIST/examples/soap \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.fasl
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.fasl
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.fasl
+	cat $(LICENSE_FASL) soap.fasl > DIST/code/soap.fasl
 	cp -p soapex.cl DIST/examples/soap
 	cp -p soapval1.cl DIST/examples/soap
 	cp -p bignum-server.cl DIST/examples/soap
 
 # Latest 7.0 patch:
-soap.004: clean compile
+soap.005: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
 	cp -p soap.fasl DIST/code/soap.004
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.004
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.004
 
 # Latest 8.0 patch:
-soap.001: clean compile
+soap.002: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
 	cp -p soap.fasl DIST/code/soap.001
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.001
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.001
-
-## 7.0 patch version 002:
-old-patch-dist: clean compile
-	rm -fr DIST DIST.src
-	mkdir DIST DIST/code DIST/examples DIST/examples/soap
-	cp -p soap.fasl DIST/code/soap.002
-	cat $(LICENSE_FASL) soapa.fasl > DIST/code/soapa.002
-	cat $(LICENSE_FASL) soapm.fasl > DIST/code/soapm.002
-	cp -p soapex.cl DIST/examples/soap
-	cp -p soapval1.cl DIST/examples/soap
-	cp -p bignum-server.cl DIST/examples/soap
 
 clean: FORCE
 	rm -fr *.fasl *.out DIST DIST.src soap[am].cl

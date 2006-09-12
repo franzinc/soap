@@ -1,3 +1,6 @@
+2006-09-12  Kevin Layer  <layer@gemini>
+
+	* Makefile: for new single fasl
 
 2006-08-28    <mm@PROA>
 
@@ -551,4 +554,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.18 $
+$Revision: 2.19 $
