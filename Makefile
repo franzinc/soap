@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.6 2006/09/12 21:35:21 layer Exp $
+# $Id: Makefile,v 2.7 2006/09/15 21:34:01 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -10,9 +10,7 @@ unix_args = +s build.tmp
 endif
 
 mlisp = ../lisp $(run_lisp_args) $(windows_args) \
-	-I dcl $(unix_args) -d buildm.out -batch -q
-alisp = ../lisp $(run_lisp_args) $(windows_args) \
-	-I adcl $(unix_args) -d builda.out -batch -q
+	-I dcl $(unix_args) -d build.out -batch -q
 
 all: clean compile DIST
 
@@ -22,7 +20,6 @@ compile: FORCE
 	echo '(load "build.cl")' >> build.tmp
 	echo '(exit)' >> build.tmp
 	$(mlisp)
-	$(alisp)
 	rm -f build.tmp
 
 ## contains the license check
@@ -45,14 +42,14 @@ soap.005: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.004
+	cp -p soap.fasl DIST/code/soap.005
 
 # Latest 8.0 patch:
 soap.002: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.001
+	cp -p soap.fasl DIST/code/soap.002
 
 clean: FORCE
 	rm -fr *.fasl *.out DIST DIST.src soap[am].cl

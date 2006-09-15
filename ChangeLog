@@ -1,3 +1,8 @@
+2006-09-15  Kevin Layer  <layer@gemini>
+
+	* Makefile: fix name of soap patches, don't use ANSI lisp use
+	  modern
+
 2006-09-12  Kevin Layer  <layer@gemini>
 
 	* Makefile: for new single fasl
@@ -554,4 +559,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.19 $
+$Revision: 2.20 $
