@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.11 2006/08/28 20:27:11 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.12 2007/01/16 00:18:25 mm Exp $
 
 ;; WSDL support
 
@@ -801,11 +801,13 @@
 	    ((setf complex-content (schema-single-part typedef :complex-content))
 	     (or (when (setf item (schema-single-part complex-content :restriction))
 		  (let* ((r-base (schema-decoded-attribute item "base"))
-			 (r-attr (schema-single-part item :attribute))
-			 (r-atype (when r-attr
-				    (schema-decoded-attribute r-attr "arrayType")))
-			 
-			 )
+			 (r-attrs (schema-single-part item :attribute :more-p t))
+			 r-attr r-atype)
+		    ;; 2006-10-24 mm rev: There may be multiple <attribute> elements.
+		    (dolist (r r-attrs)
+		      (when (setf r-atype (schema-decoded-attribute r "arrayType"))
+			(setf r-attr r)
+			(return)))
 
 		    (when *wsdl-debug*
 		      (format
@@ -943,9 +945,8 @@
 	    (when (setf x (schema-single-part typedef :union))
 	      ;; extend to a :union type ???
 	      (setf new-def `(:simple ,(xsd "string"))))
-	    (wsdl-warn conn "wsdl-define-type - unknown simple type ~S"
-		       simple)))
-
+	    (wsdl-warn conn "wsdl-define-type - unknown simple type ~S in ~S"
+		       simple typedef)))
 
 	  (t (wsdl-warn
 	      conn "wsdl-define-type - unknown form ~S err was ~A" typedef err)))
@@ -964,6 +965,13 @@
      (if (and (consp val) (eq 'quote (first val)))
 	 val
        (list 'quote val)))))
+
+;; 2006-10-24 mm rev: Sometimes we need to add quote, and sometimes we don't.
+;;    Sometimes quote must not be there.
+(defun unquote (val)
+  (if (and (consp val) (eq 'quote (first val)))
+      (second val)
+    val))
 
 (defun maybe-second (form) 
   (cond ((consp form)
@@ -1175,12 +1183,16 @@
 	 `(define-soap-element nil ,(qt method-name) ,(qt (copy-tree mtype)) ,@nillable))
        ))
 
-    ((string-equal style "document")
+    ((or (string-equal style "document")
+	 (and (null style) parts (null (cdr parts))))
 
      ;; Operation name is the element in the part
      ;;  and it was already defined in the schema.
 
      (cond 
+      ((cdr parts)
+       (error "Document style message with more than one part: ~S"
+	      (schema-listify msg)))
 
       ;; usual document  style part has the form
       ;;   <part name="xxx" element="defined-element" />
@@ -1230,7 +1242,7 @@
 					    def-tail)))
 			   (setf msg-type (maybe-second (fourth def))))))))
      nil)
-    (t (error "Unknown message format ~S." (schema-listify msg)))
+    (t (error "Unknown message style ~S in ~S." style (schema-listify msg)))
     )
 
    method-name msg-type))
@@ -1330,13 +1342,17 @@
 	   (op-out   (schema-single-part opdef :output))
 	   (out-msg-name  (when op-out (schema-decoded-attribute op-out "message")))
 	   (in-msg (when in-msg-name
-		     (schema-collected-component
-		      conn #'wsdl-messages #'schema-component-name in-msg-name)))
+		     (or
+		      (schema-lookup-component
+		       conn #'wsdl-messages #'schema-component-name in-msg-name)
+		      (error "Cannot find input message " in-msg-name))))
 	   (in-parts (when in-msg
 		       (schema-collected-parts in-msg :message :part)))
 	   (out-msg (when out-msg-name
-		      (schema-collected-component
-		       conn #'wsdl-messages #'schema-component-name out-msg-name)))
+		      (or
+		       (schema-lookup-component
+			conn #'wsdl-messages #'schema-component-name out-msg-name)
+		       (error "Cannot find output message " out-msg-name))))
 	   (out-parts (when out-msg
 			(schema-collected-parts out-msg :message :part)))
 	   (cx (when in-msg (position in-msg messages)))
@@ -2004,28 +2020,21 @@
 		     conn #'wsdl-services #'schema-component-name service t))
 	 (multiple-value-setq (bname url)
 	   (wsdl-service-binding-names conn sdef port t))
-	 (setf bdef (or (schema-collected-component
-			 conn #'wsdl-bindings #'schema-component-name bname)
+	 (setf bdef (or
+		     ;; xmethods.com QueryInterfaceService uses the wrong namespace
+		     (schema-lookup-component
+		      conn #'wsdl-bindings #'schema-component-name bname)
 
-			;; xmethods.com QueryInterfaceService uses the wrong namespace
-			(schema-collected-component
-			 conn #'wsdl-bindings #'schema-component-name (string bname))
-
-			(error "Cannot find binding ~S" bname)))
+		     (error "Cannot find binding ~S" bname)))
 	 (setf binding bdef)
 	 (setf btype   (schema-decoded-attribute bdef "type"))
 	 (setf port-name btype)
-	 (setf pdef (or (schema-collected-component
-			 conn #'wsdl-port-types #'schema-component-name port-name)
-			(case (xmp-xml-syntax conn)
-			  (:strict nil)
-			  (otherwise
-			   (schema-collected-component
-			    conn #'wsdl-port-types #'schema-component-name
-			    ;; Some WSDLs seem to have sloppy namespace tagging 
-			    ;;  ie "dConverterSOAP" in XMethods
-			    (string port-name))))
-			(error "Cannot find portType ~S" port-name)))
+	 (setf pdef (or
+		     ;; Some WSDLs seem to have sloppy namespace tagging 
+		     ;;  ie "dConverterSOAP" in XMethods
+		     (schema-lookup-component
+		      conn #'wsdl-port-types #'schema-component-name port-name)
+		     (error "Cannot find portType ~S" port-name)))
 	 (push (list service (schema-component-name sdef) bname port-name 
 		     (schema-component-name pdef))
 	       input-args)
@@ -2592,7 +2601,11 @@
 		`(defun ,new-name (&key ,@names)
 		   ,@(mapcan #'(lambda (name etype &aux ltype)
 				 (when (setf ltype (wsdl-type-to-lisp-type conn etype))
-				   (list (list 'check-type name (qt ltype)))))
+				   (list (list 'check-type name
+					       ;; 2006-10-24 mm rev: [bug16488] 
+					       ;; make sure type spec is not quoted
+					       (unquote ltype)
+					       ))))
 			     names etypes)
 		   (make-instance ,(qt class-name)
 				  ,@(mapcan #'(lambda (key name) (list key name))
@@ -2937,7 +2950,12 @@
 				(spec (wsdl-type-to-specializer conn (third elt))))
 		     (and (eq spec t)
 			  (setf ltype (wsdl-type-to-lisp-type conn (third elt)))
-			  (push (list 'check-type var (qt ltype)) check-types))
+			  (push (list 'check-type var
+				      ;; 2006-10-24 mm rev: [bug16488] 
+				      ;; make sure type spec is not quoted
+				      (unquote ltype)
+				      )
+				check-types))
 		     (list var spec))
 		 parts))
       ,@check-types

@@ -1,3 +1,32 @@
+
+2007-01-15    <mm@PROA>
+
+	* xmp-wsdl.cl (wsdl-bind-operation): do lenient message lookup
+	* xmp-soap.cl (call-soap-method): set soap-message-headers slot
+	     (xmp-server-implementation): set soap-message-headers slot
+	                  and accept messages with simple (not complex) body
+	* xmp-soap.cl (soap-add-header): specialize second arg on soap-header
+	      (soap-add-header): add more general method that calls make-soap-header
+	* xmp-soap.cl (soap-encode-headers): needed to add tag to header element
+	* xmp-schema.cl (define-schema-elements): complexContent has its own definition
+	                                          of restriction
+			(schema-decode-attribute): decode "ref" attribute
+			(schema-lookup-group): look a little harder
+			(schema-single-collector): follow group ref to def
+			(schema-parts-to-type): look for restriction/simpleType/list
+	* xmp-wsdl.cl (wsdl-emit-object-classes): [bug16488] make sure type spec is
+	                      is not quoted in check-type form
+			      (wsdl-emit-wrapper): [bug16488] make sure type spec is
+	                           not quoted in check-type form
+			      (wsdl-define-type): arrayType may not be the only attribute
+	* xmp-soap.cl (soap-add-header): add header at the end of list if before
+	                     or after not found
+	        (soap-encode-headers): [bug16470] new method that combines header list
+		(soap-encode-message): [bug16470] call soap-encode-headers
+	* xmp-schema.cl (schema-maybe-loose-type): [bug16483] avoid lookup of nil type
+	            (schema-parts-to-type): [bug16483] avoid wrapping complex type
+	                                       with :simple
+
 2006-09-15  Kevin Layer  <layer@gemini>
 
 	* Makefile: fix name of soap patches, don't use ANSI lisp use
@@ -559,4 +588,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.20 $
+$Revision: 2.21 $

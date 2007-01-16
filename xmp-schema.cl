@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-schema.cl,v 2.9 2006/08/28 20:27:07 mm Exp $
+;; $Id: xmp-schema.cl,v 2.10 2007/01/16 00:18:25 mm Exp $
 
 ;; XML Schema support
 
@@ -51,6 +51,7 @@
    #:schema-raw-attribute
    #:schema-decoded-attribute
    #:schema-collected-component
+   #:schema-lookup-component
    #:schema-collected-parts
    #:schema-single-part
    #:schema-parts-to-type
@@ -302,10 +303,33 @@
 		 :test #'(lambda (x y) (xmp-match-name conn y x ignore-case))
 		 :key key-accessor)))
 
+(defmethod schema-lookup-component ((conn schema-file-connector) 
+				    collection-accessor key-accessor key-value
+				    &optional ignore-case)
+  (or (schema-collected-component
+       conn collection-accessor key-accessor key-value ignore-case)
+      (case (xmp-xml-syntax conn)
+	(:strict nil)
+	(otherwise
+	 (typecase key-value
+	   (string nil)
+	   (symbol
+	    (schema-collected-component
+	     conn collection-accessor key-accessor (string key-value) ignore-case)))))))
+
 
 
 (defmethod schema-single-collector ((comp schema-component))
-  (schema-single-part comp #'(lambda (x) (xmp-collector-p nil x))))
+  (or 
+   (schema-single-part comp #'(lambda (x) (xmp-collector-p nil x)))
+   ;; 2006-10-24 mm rev:
+   ;; Follow a <group ref=> to its definition.
+   (let* ((group (schema-single-part comp :group))
+	  (def (when group (schema-lookup-group (schema-source group) group))))
+     (when def (schema-single-collector def)))))
+   
+
+   
 
 (defmethod schema-collector-to-type ((sub schema-component) &key options)
   (list* :complex (schema-component-to-collector sub) options))
@@ -345,6 +369,8 @@
 	 (e-collector (first e-coll))
 	 (b-tail (cdr b-coll))
 	 (e-tail (cdr e-coll))
+	 ;;2006-10-24 mm rev: options are the same in all emitted results
+	 (newopt (append (cddr base) (cddr ext) options))
 	 )
     (cond ((and (eq b-kind e-kind)
 		(case b-kind
@@ -353,10 +379,18 @@
 			  (cond ((eq b-collector e-collector)
 				 (list* b-kind
 					(list* b-collector (append b-tail e-tail))
-					(append (cddr base) (cddr ext) options)))
+					newopt))
 				((null b-tail)
-				 (list* b-kind e-coll
-					(append (cddr base) (cddr ext) options)))
+				 (list* b-kind e-coll newopt))
+				((and (not (eq :or b-collector)) (eq :or e-collector))
+				 ;; 2006-10-24 mm rev:
+				 ;; Base is a collection of some kind,
+				 ;; and extension is a <choice>.
+				 ;; Add the choices to the collection.
+				 (list* b-kind
+					(list* b-collector (append b-tail 
+								   (list e-coll)))
+					newopt))
 				(t (schema-error-p
 				    conn error-p "cannot merge (a) ~S ~S" base ext))))
 			 (t (schema-error-p
@@ -395,14 +429,28 @@
 					      "incompatible base and extension ~S ~S"
 					      b-type extype))))
 			 (t (schema-error-p conn error-p
-					    "unrecognised extension ~S" extype))))
+					    "unrecognised extension type ~S" extype))))
 		       (t (schema-error-p
 			   conn error-p
 			   "unrecognised content in extension ~S" ext))))
-		     ((null (schema-component-content ext))
-		      b-type)))
+		     ((null
+		       ;;2006-10-24 mm rev: If there are no structural
+		       ;;  components, then map extension to base type.
+		       (schema-single-part ext '(:complex-type) :more-p t
+					   :ignored '(:attribute)))
+		      b-type)
+		     ;; 2006-10-24 mm rev: Avoid falling through with nil result.
+		     (t (schema-error-p conn error-p 
+					"unrecognised extension ~S" ext))
+		     ))
 		   (t (schema-error-p
 		       conn error-p "base type is not collection: ~S ~S" ext b-type))))
+		 ((setf ext (schema-single-part part :restriction))
+		  ;; 2006-10-24 mm rev: Map a <restriction> to the base type.
+		  (cond
+		   ((setf b-type (schema-base-type conn ext))   b-type)
+		   (t (schema-error-p
+		       conn error-p "base type is not recognized in ~S" part))))
 		 (t (schema-error-p
 		     conn error-p "unrecognised complexContent ~S" part))))
 	       ((setf part (schema-single-part comp :simple-content))
@@ -410,13 +458,15 @@
 		 ((setf ext (schema-single-part part :extension))
 		  (cond
 		   ((setf b-type (schema-base-type conn ext))
-		    (list :simple b-type))
+		    b-type ;;; 2006-10-24 mm rev: [bug16483] b-type is a typespec
+		    )
 		   (t (schema-error-p
 		       conn error-p "base type is not recognized in ~S" part))))
 		 ((setf ext (schema-single-part part :restriction))
 		  (cond
 		   ((setf b-type (schema-base-type conn ext))
-		    (list :simple b-type))
+		    b-type ;;; 2006-10-24 mm rev: [bug16483] b-type is a typespec
+		    )
 		   (t (schema-error-p
 		       conn error-p "base type is not recognized in ~S" part))))
 		 (t (schema-error-p
@@ -442,14 +492,23 @@
 	       (t (schema-error-p conn error-p "Unknown complex-type: ~S" comp))))
 
 	((eq key :simple-type)
-	 (cond ((and (setf part (schema-single-part comp :restriction))
-		     (setf base (schema-decoded-attribute part "base")))
-		base)
-	       ((schema-single-part comp :list) (list :simple (xsd "string")))
-	       ((and (setf sub (schema-single-part comp :ignored))
-		     (eq :union (schema-element-key sub)))
-		(list :simple (xsd "string")))
-	       (t (schema-error-p conn error-p "Unknown simple-type: ~S" comp))))
+	 (cond
+	  ((setf part (schema-single-part comp :restriction))
+	   ;; 2006-10-24 mm rev: There are several cases of restriction on simple-type.
+	   (cond ((setf base (schema-decoded-attribute part "base"))
+		  ;; Base type is a named type.
+		  base)
+		 ((and (setf base (schema-single-part part :simple-type))
+		       (setf base (schema-single-part base :list)))
+		  ;; Defined type is a list of base type items.
+		  (list :simple (xsd "string")))
+		 (t (schema-error-p conn error-p "Unknown restriction ~S in ~S"
+				    part comp))))
+	  ((schema-single-part comp :list) (list :simple (xsd "string")))
+	  ((and (setf sub (schema-single-part comp :ignored))
+		(eq :union (schema-element-key sub)))
+	   (list :simple (xsd "string")))
+	  (t (schema-error-p conn error-p "Unknown simple-type: ~S" comp))))
 
 	((eq key :simple-content)
 	 (cond ((and (setf part (schema-single-part comp :extension))
@@ -506,7 +565,11 @@
      (cond ((null (setf ref (schema-raw-attribute comp "ref")))
 	    ;; must be a <group> definition collected earlier during parse
 	    nil)
-	   ((null (setf rdef (schema-lookup-group (schema-source comp) ref)))
+	   ((null (setf rdef (schema-lookup-group
+			      (schema-source comp)
+			      ;; 2006-10-24 mm rev:
+			      ;; schema-lookup-group exects a component pointer.
+			      comp)))
 	    (error "Undefined group reference ~A" ref))
 	   (t (list (schema-component-to-collector (schema-single-collector rdef))))))
     ((eq key :annotation) nil)
@@ -857,7 +920,7 @@
        )))
 
 
-  ;; <restriction
+  ;; <restriction     --- in simpleType   (2006-10-24 mm rev:)
   ;;   base = QName
   ;;   id = ID
   ;;   {any attributes with non-schema namespace . . .}>
@@ -868,7 +931,7 @@
   ;;                  | enumeration | whiteSpace | pattern)*))
   ;; </restriction>
   ;;
-  ;; <restriction
+  ;; <restriction     --- in simpleContent   (2006-10-24 mm rev:)
   ;;   base = QName
   ;;   id = ID
   ;;   {any attributes with non-schema namespace . . .}>
@@ -879,6 +942,9 @@
   ;;                  | enumeration | whiteSpace | pattern)*)?,
   ;;              ((attribute | attributeGroup)*, anyAttribute?))
   ;; </restriction>
+  ;;
+
+  
   (define-xmp-element nil (xsd "restriction")
     `(:complex (:seq? ,(xsd "annotation")
 		      ,(xsd "simpleType")
@@ -952,9 +1018,29 @@
   ;;   {any attributes with non-schema namespace . . .}>
   ;;   Content: (annotation?, (restriction | extension))
   ;; </complexContent>
+  ;;
+  ;; <restriction
+  ;;   base = QName
+  ;;   id = ID
+  ;;   {any attributes with non-schema namespace . . .}>
+  ;;   Content: ( annotation?,
+  ;;             (group | all | choice | sequence)?,
+  ;;             ((attribute | attributeGroup)*, anyAttribute?))
+  ;; </restriction>
+
   (define-xmp-element nil (xsd "complexContent")
     `(:complex (:seq? ,(xsd "annotation")
-		      (:or ,(xsd "restriction") ,(xsd "extension")))))
+		      (:or (:element
+			    ,(xsd "restriction")
+			    ;; 2006-10-24 mm rev: insert content def from spec.
+			    (:complex
+			     (:seq?
+			      ,(xsd "annotation")
+			      (:or ,(xsd "group") ,(xsd "all") ,(xsd "choice")
+				   ,(xsd "sequence"))
+			      (:set* ,(xsd "attribute") ,(xsd "attributeGroup"))
+			      ,(xsd "anyAttribute"))))
+			   ,(xsd "extension")))))
 
   ;; <field
   ;;   id = ID
@@ -1090,7 +1176,11 @@
     ((or (when (eq attrkey (xmp-symbol "base" :keyword))
 	   (setf attr-loose 'base-loose attr-targeted 'base-targeted) t)
 	 (when (eq attrkey (xmp-symbol "type" :keyword))
-	   (setf attr-loose 'type-loose attr-targeted 'type-targeted) t))
+	   (setf attr-loose 'type-loose attr-targeted 'type-targeted) t)
+	 ;; 2006-10-24 mm rev: ref attribute is one more for strict/loose treatment
+	 (when (eq attrkey (xmp-symbol "ref" :keyword))
+	   (setf attr-loose 'ref-loose attr-targeted 'ref-targeted) t)
+	 )
      (let* ((strict (xmp-decode-qualified-name conn value nss :suppress-default t))
 	    (not-strict (case (xmp-xml-syntax conn) (:strict nil) (otherwise t)))
 	    (targeted (when not-strict (schema-targeted-name conn value :nss nss)))
@@ -1386,12 +1476,20 @@
        (declare (ignore options))
        nil)))
 
+;; 2006-10-24 mm rev: supress a few more warnings...
+(define-schema-ignored-part schema-file-connector (xsd "whiteSpace"))
+(define-schema-ignored-part schema-file-connector (xsd "key"))
+(define-schema-ignored-part schema-file-connector (xsd "fractionDigits"))
+(define-schema-ignored-part schema-file-connector (xsd "totalDigits"))
+(define-schema-ignored-part schema-file-connector (xsd "notation"))
+
 
 (define-schema-simple-part schema-file-connector (xsd "extension")     :extension)
 (define-schema-simple-part schema-file-connector (xsd "simpleContent") :simple-content)
 (define-schema-simple-part schema-file-connector (xsd "restriction")   :restriction)
 (define-schema-simple-part schema-file-connector (xsd "maxLength")     :max-length)
 (define-schema-simple-part schema-file-connector (xsd "maxlength")     :max-length)
+(define-schema-simple-part schema-file-connector (xsd "minLength")     :min-length)
 (define-schema-simple-part schema-file-connector (xsd "pattern")       :pattern)
 (define-schema-simple-part schema-file-connector (xsd "any")           :any)
 (define-schema-simple-part schema-file-connector (xsd "anyAttribute")  :any-attribute)
@@ -1408,26 +1506,40 @@
   (schema-maybe-loose-type conn ext 'base-loose 'base-targeted))
 
 (defmethod schema-maybe-loose-type ((conn schema-file-connector) ext
-				    attr-loose attr-targeted)
+                                    attr-loose attr-targeted)
   ;; Return a type-spec or nil
   (let* ((strict (schema-decoded-attribute ext "base"))
-	 (targeted (schema-decoded-attribute ext attr-targeted))
-	 (loose (schema-decoded-attribute ext attr-loose))
-	 (component 
-	  (or (schema-lookup-type conn strict)
-	      (case (xmp-xml-syntax conn)
-		(:strict nil)
-		(otherwise
-		 (or (schema-lookup-type conn targeted)
-		     (schema-lookup-type conn loose)))))))
+         (targeted (schema-decoded-attribute ext attr-targeted))
+         (loose (schema-decoded-attribute ext attr-loose))
+         (component
+          (or (and strict  ;;; 2006-10-24 mm rev: [bug16483] avoid lookup of nil
+		   (schema-lookup-type conn strict))
+              (case (xmp-xml-syntax conn)
+                (:strict nil)
+                (otherwise
+                 (or
+		  (and targeted	;;; 2006-10-24 mm rev: [bug16483] avoid lookup of nil
+		       (schema-lookup-type conn targeted))
+		  (and loose ;;; 2006-10-24 mm rev: [bug16483] avoid lookup of nil
+		       (schema-lookup-type conn loose))))))))
     (if component
-	(schema-parts-to-type component)
-      (or (xmp-find-type conn strict :in)
-	  (case (xmp-xml-syntax conn)
-	    (:strict nil)
-	    (otherwise
-	     (or (xmp-find-type conn targeted :in)
-		 (xmp-find-type conn loose :in))))))))
+        (schema-parts-to-type component)
+      (flet ((find-type (conn name nss)
+			;; 2006-10-24 mm rev: [bug16483] avoid lookup of nil type 
+			;;  and keep named base types as names
+                        (let ((def (when name (xmp-find-type conn name nss))))
+                          (if (and (consp def)
+                                   (eq :simple (first def))
+                                   (null (second def)))
+                              name
+                            def))))
+        (or (find-type conn strict :in)
+            (case (xmp-xml-syntax conn)
+              (:strict nil)
+              (otherwise
+               (or (find-type conn targeted :in)
+                   (find-type conn loose :in)))))))))
+
 
 
 (defmethod schema-lookup-type ((conn schema-file-connector) name)
@@ -1436,8 +1548,23 @@
 (defmethod schema-lookup-element ((conn schema-file-connector) name)
   (schema-collected-component conn #'schema-elements #'schema-component-name name))
 
-(defmethod schema-lookup-group ((conn schema-file-connector) name)
-  (schema-collected-component conn #'schema-groups #'schema-component-name name))
+(defmethod schema-lookup-group ((conn schema-file-connector) comp &aux name)
+  ;; 2006-10-24 mm rev: 
+  ;; If comp is a <group> element that references a definition,
+  ;;    then find the definition and return it.
+  (or
+   (and (setf name (schema-decoded-attribute comp "ref"))
+	(schema-collected-component conn #'schema-groups #'schema-component-name name))
+   (case (xmp-xml-syntax conn)
+     (:strict nil)
+     (otherwise
+      (or
+       (and (setf name (schema-decoded-attribute comp 'ref-targeted))
+	    (schema-collected-component
+	     conn #'schema-groups #'schema-component-name name))
+       (and (setf name (schema-decoded-attribute comp 'ref-loose))
+	    (schema-collected-component
+	     conn #'schema-groups #'schema-component-name name)))))))
 
 
 (define-schema-elements)

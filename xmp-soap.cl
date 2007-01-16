@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.12 2006/08/28 20:27:08 mm Exp $
+;; $Id: xmp-soap.cl,v 2.13 2007/01/16 00:18:25 mm Exp $
 
 ;; SOAP support
 
@@ -206,6 +206,7 @@
    soap-server-message-signature
    soap-server-message-action 
    soap-message-body
+   soap-message-headers
    soap-get-attribute 
    soap-get-attributes 
    soap-make-fault
@@ -383,6 +384,8 @@
     ;; THESE SLOTS ARE NOT COPIED by xmp-copy methods
     (soap-message-body   :accessor soap-message-body   :initform nil
 			 :documentation "no-xmp-copy")
+    (soap-message-headers :accessor soap-message-headers   :initform nil
+			  :documentation "no-xmp-copy")
     (soap-message-arrays :accessor soap-message-arrays :initform nil
 			 :documentation "no-xmp-copy")
 
@@ -425,6 +428,11 @@
     ))
 
   )
+
+(defclass soap-element (xmp-element) ())
+(defclass soap-header  (soap-element) ())
+(defclass soap-fragment (xmp-element) ())
+
 
 #+ignore
 (defmethod xmp-copy ((object soap-connector)
@@ -476,7 +484,17 @@
 				  &aux (*xmp-warning-leader* "SOAP"))
   (apply 'make-instance class (remove-keys '(:class) options)))
 
-(defmethod soap-add-header ((conn soap-connector) header &key after before reset)
+(defmethod soap-add-header ((conn soap-connector) (header t)
+			    &key parts after before reset)
+  (soap-add-header conn (apply #'make-soap-header header parts)
+		   :after after :before before :reset reset))
+
+(defmethod soap-add-header ((conn soap-connector) (header soap-header)
+			    &key parts after before reset)
+  (when parts 
+    (error "~A~A"
+	   "soap-add-header :parts argument makes sense only "
+	   "if header argument is a type or typespec"))
   (let ((all (soap-headers conn)))
     (when reset
       (setf (soap-headers conn) (setf all nil)))
@@ -485,13 +503,16 @@
 	  (t
 	   (do ((tail all (cdr tail)))
 	       ((atom tail))
-	     (when (cond (after   (eq (car tail) after))
+	     (when (cond ((null (cdr tail))
+			  ;; 2006-10-24 mm rev: add new header at the end 
+			  ;;   if before or after is not found
+			  t)
+			 (after   (eq (car tail) after))
 			 (before  (cond ((eq (car tail) before)
 					 (setf (soap-headers conn) 
 					       (setf all (cons header all)))
 					 (return))
-					((eq (cadr tail) before) t)))
-			 ((null (cdr tail)) t))
+					((eq (cadr tail) before) t))))
 	       (setf (cdr tail) (cons header (cdr tail)))
 	       (return)))))
     header))
@@ -503,9 +524,6 @@
   (declare (ignore options))
   class)
 
-(defclass soap-element (xmp-element) ())
-(defclass soap-header  (soap-element) ())
-(defclass soap-fragment (xmp-element) ())
 
 
    
@@ -1046,6 +1064,21 @@
 	    "")))
 
 
+(defmethod soap-encode-headers ((conn soap-connector))
+  ;; 2006-10-24 mm rev: [bug16470] Combine header list into a single Header element
+  (let ((hs (soap-headers conn)))
+    (cond ((null  hs) nil)
+	  ((null (cdr hs)) (xmp-encode conn (car hs) nil))
+	  (t (let ((new (make-instance 'soap-header))
+		   (content ""))
+	       (dolist (h hs)
+		 (setf content (concatenate 'string content
+					    (xmp-element-content h))))
+	       (setf (xmp-element-type new) (env "Header")
+		     (xmp-element-tag1 new) (env "Header")
+		     (xmp-element-content new) content)
+	       (xmp-encode conn new nil))))))
+
 (defmethod soap-encode-message ((conn soap-connector) method args &aux def)
   (xmp-message-begin conn)
   (xmp-encode-content conn (soap-xml-leader conn)
@@ -1055,8 +1088,7 @@
 		    (when (soap-encoding-style conn)
 		      (list (env "encodingStyle") (soap-encoding-style conn)))
 		    )
-  (dolist (h (soap-headers conn))
-    (xmp-encode conn h nil))
+  (soap-encode-headers conn) ;;; 2006-10-24 mm rev: [bug16470] Combine header list
   (xmp-encode-begin conn (env "Body"))
   (cond 
     ((typep method 'xmp-element)
@@ -1103,7 +1135,8 @@
 	       (let* ((blist (cdr (assoc :body (cdr res))))
 		      (hlist (cdr (assoc :headers (cdr res))))
 		      (body (first blist)))
-		 (setf (soap-message-body conn) blist)
+		 (setf (soap-message-body conn) blist
+		       (soap-message-headers conn) hlist)		 
 		 
 		 ;; Update content of arrays now
 		 (soap-update-arrays conn)
@@ -1258,6 +1291,7 @@
 (defmethod xmp-begin-message ((conn soap-string-in-connector))
   (setf (soap-undef-list conn) nil
 	(soap-message-body conn) nil
+	(soap-message-headers conn) nil
 	(soap-message-arrays conn) nil
 	)
   (list :seq1 (env "Envelope")))
@@ -2278,14 +2312,18 @@
 		     (headers (assoc :headers (cdr r)))
 		     body method signature params)
 		;; Save pointer to body and extract all parts looking for multiRef's
-		(setf (soap-message-body server) blist)
+		(setf (soap-message-body server) blist
+		      (soap-message-headers server) (cdr headers))
 		(setf body (soap-result-pair server blist 0))
 
 		;; Update content of arrays now
 		(soap-update-arrays server)
 		
 		(setf method (first body))
-		(setf signature (list* action nil (mapcar #'car (cdr body))))
+		(setf signature (list* action nil
+				       ;; if body is not complex, then signature is nil
+				       (when (consp (first (cdr body)))
+					 (mapcar #'car (cdr body)))))
 		(setf params (mapcar
 			      #'(lambda (x) (soap-result-string server x nil))
 			      (cdr body)))
