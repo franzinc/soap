@@ -1,5 +1,5 @@
 
-;; $Id: build.cl,v 2.8 2006/08/28 20:27:03 mm Exp $ 
+;; $Id: build.cl,v 2.9 2007/01/17 18:32:18 layer Exp $ 
 
 (in-package :user)
 
@@ -72,7 +72,7 @@
 		  out)))	       
 
      ;; Patch level # must be updated consistently in soap.cl and Makefile.
-     #+(version= 8 0) (patch-level 2)
+     #+(version= 8 0) (patch-level 3)
      #+(version= 7 0) (patch-level 5)
      #+(and (version>= 6 2) (not (version>= 7))) (patch-level 5)
      

@@ -17,14 +17,17 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soap.cl,v 2.8 2006/08/28 20:27:04 mm Exp $
+;; $Id: soap.cl,v 2.9 2007/01/17 18:32:18 layer Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
 
 #+(version= 8 0)
-(sys:defpatch "soap" 2 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+(sys:defpatch "soap" 3 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
   "v1: improved handling of nillable and anyType
-v2: <include> handling and many other extensions."
+v2: <include> handling and many other extensions;
+v3: generate check-type with quoted typespec, message has one header element
+    with one or more parts, WSDL simpleContent with extension generates
+    garbled def."
   :type :system
   :post-loadable t)
 
