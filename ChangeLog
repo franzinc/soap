@@ -1,3 +1,18 @@
+2007-02-20    <mm@PROA>
+
+	* xmp-wsdl.cl (wsdl-make-interface): emit publish arg  derived from
+	                                  uri [rfe6782]
+	* xmp-wsdl.cl (decode-wsdl-source): make sure that WSDL string is 
+	              not printed in comment [bug16611]
+		      (wsdl-generate-code): add new call with info=:method-body
+	                      called for body of server method
+	           (wsdl-make-interface): emit server-port default derived from
+	                                  uri [rfe6782]
+		   (wsdl-generate-code): look at generate-comments option, if true,
+	                    emit w-g-c form as a comment in the code file
+			    (wsdl-index-form): emit ;; comment for top-level forms
+	* xmp-wsdl.cl (wsdl-bind-operation): add message name to error format string
+
 2007-01-17  Kevin Layer  <layer@gemini.franz.com>
 
 	* Makefile: incf patch # for 8.0
@@ -593,4 +608,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.22 $
+$Revision: 2.23 $

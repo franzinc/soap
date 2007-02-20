@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.12 2007/01/16 00:18:25 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.13 2007/02/20 16:33:11 mm Exp $
 
 ;; WSDL support
 
@@ -393,7 +393,8 @@
 	 (setf source (list :stream (ignore-errors (namestring stream)))))
 	(string
 	 (when (or uri stream file) (error "Ambiguous source."))
-	 (setf source (list :string string)))
+	 (setf source (list :string "..." string))   ;;; bug16611
+	 )
 	(file
 	 (when (or string stream uri) (error "Ambiguous source."))
 	 (setf source (list :file file)))
@@ -1345,14 +1346,14 @@
 		     (or
 		      (schema-lookup-component
 		       conn #'wsdl-messages #'schema-component-name in-msg-name)
-		      (error "Cannot find input message " in-msg-name))))
+		      (error "Cannot find input message ~A" in-msg-name))))
 	   (in-parts (when in-msg
 		       (schema-collected-parts in-msg :message :part)))
 	   (out-msg (when out-msg-name
 		      (or
 		       (schema-lookup-component
 			conn #'wsdl-messages #'schema-component-name out-msg-name)
-		       (error "Cannot find output message " out-msg-name))))
+		       (error "Cannot find output message ~A" out-msg-name))))
 	   (out-parts (when out-msg
 			(schema-collected-parts out-msg :message :part)))
 	   (cx (when in-msg (position in-msg messages)))
@@ -1543,7 +1544,7 @@
 							 conn (string k)))
 						    key-list))
 		     (let ,ret-vars
-		       "INSERT BODY HERE"
+		       ,(wsdl-generate-code conn mode :method-body op-name)   
 		       ,(if (and ret-def (eq style-key :rpc))
 			    `(list ,(string (part-name (first out-parts)))
 				   (list ,@ret-parts))
@@ -1558,9 +1559,17 @@
 (defmethod wsdl-generate-code ((conn wsdl-file-connector) (mode t) (info t)
 			       (op t) &rest args)
   ;; Called mostly from wsdl-index-form, but sometimes for inner forms as well
-  (if (and (null op) (null (cdr args)))
-      (first args)
-    (cons op args)))
+  (let ((form
+	 (cond ((and (null op) (null (cdr args))) (first args))
+	       ((eq info :method-body) "INSERT BODY HERE")
+	       (t (cons op args)))))
+    (if (wsdl-option conn :generate-comments)
+	(list 'if nil
+	      (list* 'wsdl-generate-code '<conn> mode info op args)
+	      form)
+      form)))
+
+
 
 
 (defmethod wsdl-service-binding-names ((conn wsdl-file-connector) sdef port
@@ -1874,6 +1883,22 @@
     (setf comments (append comments (if (consp comm2)
 					comm2
 				      (list comm2)))))
+  (when (and (wsdl-option conn :generate-comments)
+	     (consp form) (eq 'if (first form)) (null (second form)))
+    (let* ((*print-pretty* nil)
+	   (w (third form))
+	   (ws (format nil "~S" w))
+	   (out (fourth form))
+	   (ln (length ws)))
+      (cond ((< ln 100))
+	    (t (setf ws (format nil "(~S <conn> ~S ~S ~S ...)" 
+				(first w) (third w) (fourth w) (fifth w)))
+	       (setf ln (length ws))
+	       (cond ((< ln 100))
+		     ( t (setf ws (format nil "(w-g-c <conn> ~S ~S ~S ...)" 
+					  (third w) (fourth w) (fifth w)))))))
+      (setf comments (append comments (list ws)))
+      (setf form out)))
   (with-slots
    (def-list sub-list def-index) conn
    (etypecase form
@@ -1999,7 +2024,7 @@
 				(post-file  :insert)
 				connect-class built-in-arrays defined-arrays
 				send-atype send-asize sequence response redef
-				object-access xml-syntax
+				object-access xml-syntax generate-comments
 
 				&aux
 				input-args
@@ -2024,8 +2049,7 @@
 		     ;; xmethods.com QueryInterfaceService uses the wrong namespace
 		     (schema-lookup-component
 		      conn #'wsdl-bindings #'schema-component-name bname)
-
-		     (error "Cannot find binding ~S" bname)))
+		     (error "Cannot find binding ~A" bname)))
 	 (setf binding bdef)
 	 (setf btype   (schema-decoded-attribute bdef "type"))
 	 (setf port-name btype)
@@ -2034,7 +2058,7 @@
 		     ;;  ie "dConverterSOAP" in XMethods
 		     (schema-lookup-component
 		      conn #'wsdl-port-types #'schema-component-name port-name)
-		     (error "Cannot find portType ~S" port-name)))
+		     (error "Cannot find portType ~A" port-name)))
 	 (push (list service (schema-component-name sdef) bname port-name 
 		     (schema-component-name pdef))
 	       input-args)
@@ -2163,6 +2187,7 @@
 					  :object-class object-class
 					  :object-access object-access
 					  :exported-symbols (list nil)
+					  :generate-comments generate-comments
 					  )
 		;; MUST call wsdl-compose-name after options are pre-set
 		(wsdl-map-name conn) (or map (wsdl-compose-name
@@ -2212,16 +2237,22 @@
 	     (wsdl-index-form
 	      conn
 	      `(defun ,(wsdl-compose-name conn nil prefix :make-server)
-		 (&optional (,(wsdl-file-local-name conn "port") 8080))
+		 (&optional (,(wsdl-file-local-name conn "port")
+			     (or (ignore-errors
+				   (net.uri:uri-port   ;;; rfe6782 
+				    (net.uri:parse-uri
+				     ,(wsdl-url-name conn))))
+				 8080)))
 		 (let ((,(wsdl-file-local-name conn "s")
 			,(apply #'wsdl-generate-code
 				conn mode nil
 				'soap-message-server
-				:start (list 'list :port (wsdl-file-local-name conn "port"))
+				:start (list 'list :port
+					     (wsdl-file-local-name conn "port"))
 				:enable :start
-				:publish (list 'list :path
-					       (xmp-resolve-uri (wsdl-soap-address conn)
-								:path))
+				:publish `(net.uri:uri-path  ;;; rfe6782 
+					   (net.uri:parse-uri
+					    ,(wsdl-url-name conn)))
 				
 				:lisp-package :keyword
 				(append 
@@ -2365,12 +2396,12 @@
 		     (wsdl-print-env
 		      conn
 		      #'(lambda ()
-			  (apply #'format nil "WSDL source: ~S ~A"
+			  (format nil "WSDL source: ~{~S ~A~}"
 				 (if (consp (schema-source conn))
 				     (list (first (schema-source conn))
 					   (second (schema-source conn)))
 				   (list (schema-source conn) "")))))
-		     ;;           WSDL source:
+
 		     (format nil "    Service: ~A" (second (first input-args)))
 		     (format nil "    Binding: ~A" (third (first input-args)))
 		     (format nil "   portType: ~A" (fifth (first input-args)))

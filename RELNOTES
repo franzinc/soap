@@ -1,5 +1,21 @@
 Release notes entries for the next release.     -*- mode: text -*-
 
+In patches soap.003(8.0)  soap.006(7.0):
+
+ - new keyword argument to make-client-interface and make-server-interface
+   generate-comments -- When true, generate comments in the output file.
+            The comments show where wsdl-generate-code is called
+            and the srguments.  This output may help in designing
+	    application specific methods for wsdl-generate-code.
+
+ - in generated server code, derive the default server port number from the
+       service URL.
+
+ - call wsdl-generae-code with info=:method-body to emmit the
+       comment "INSERT BODY HERE"
+
+
+
 In patches soap.002(8.0)  soap.005(7.0):
 
  - several extensions to make-client-interface and make-server-interface
