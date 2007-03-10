@@ -1,3 +1,10 @@
+2007-03-10    <mm@PROA>
+
+	* xmp-wsdl.cl (wsdl-report-imports): new method to report included
+	                   and imported files
+		       (decode-wsdl-source): use wsdl-report-imports
+		       (wsdl-make-interface): use wsdl-report-imports
+
 2007-02-20    <mm@PROA>
 
 	* xmp-wsdl.cl (wsdl-make-interface): emit publish arg  derived from
@@ -608,4 +615,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.23 $
+$Revision: 2.24 $

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.13 2007/02/20 16:33:11 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.14 2007/03/10 23:43:47 mm Exp $
 
 ;; WSDL support
 
@@ -435,26 +435,28 @@
        (cond (string (xmp-decode-string conn string))
 	     (file   (xmp-decode-file conn file))
 	     (stream (xmp-decode-stream conn stream)))))
-
-    (and verbose
-	 (dolist (s (cdr (schema-imports conn)))
-	   (when (eq (xsd "include") (schema-element-tag s))
-	     (if (schema-raw-attribute s :included)
-		 (format t "~&; schemaLocation=~A included with ~A~%"
-			 (schema-raw-attribute s "schemaLocation")
-			 (schema-raw-attribute s :included))
-	       (format t "~&; schemaLocation=~A was not included.~%"
-		       (schema-raw-attribute s "schemaLocation"))))
-	   (when (eq (xsd "import") (schema-element-tag s))
-	     (if (schema-raw-attribute s :imported)
-		 (format t "~&; schemaLocation=~A imported with ~A~%"
-			 (schema-raw-attribute s "schemaLocation")
-			 (schema-raw-attribute s :included))
-	       (format t "~&; schemaLocation=~A was not imported.~%"
-		       (schema-raw-attribute s "schemaLocation"))))
-	   ))
-
+    (wsdl-report-imports conn :verbose verbose)
     (values-list (append (list conn) vals))))
+
+(defmethod wsdl-report-imports ((conn wsdl-file-connector) &key verbose)
+  (and verbose
+       (dolist (s (cdr (schema-imports conn)))
+	 (when (eq (xsd "include") (schema-element-tag s))
+	   (if (schema-raw-attribute s :included)
+	       (format t "~&; schemaLocation=~A included with ~A~%"
+		       (schema-raw-attribute s "schemaLocation")
+		       (schema-raw-attribute s :included))
+	     (format t "~&; schemaLocation=~A was not included.~%"
+		     (schema-raw-attribute s "schemaLocation"))))
+	 (when (eq (xsd "import") (schema-element-tag s))
+	   (if (schema-raw-attribute s :imported)
+	       (format t "~&; schemaLocation=~A imported with ~A~%"
+		       (schema-raw-attribute s "schemaLocation")
+		       (schema-raw-attribute s :imported))
+	     (format t "~&; schemaLocation=~A was not imported.~%"
+		     (schema-raw-attribute s "schemaLocation"))))
+	 )))
+  
 
 (defun local-case-keyword (x)
   (etypecase x
@@ -2065,16 +2067,7 @@
 	 (setf opdefs (schema-collected-parts pdef :port-type :operation))
 	 )
 	(t (error "Cannot find service ~S" service)))
-
-  (and verbose
-       (dolist (s (cdr (schema-imports conn)))
-	 (when (eq (xsd "include") (schema-element-tag s))
-	   (if (schema-raw-attribute s :included)
-	       (format t "~&; schemaLocation=~A included with ~A~%"
-		       (schema-raw-attribute s "schemaLocation")
-		       (schema-raw-attribute s :included))
-	     (format t "~&; schemaLocation=~A was not included.~%"
-		     (schema-raw-attribute s "schemaLocation"))))))
+  (wsdl-report-imports conn :verbose verbose)
   (setf (wsdl-warnings conn) 0)
   
   (etypecase destination
