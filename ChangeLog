@@ -1,3 +1,14 @@
+2007-03-19    <mm@PROA>
+
+	* xmp-wsdl.cl (wsdl-make-interface): :publish argument to wsdl-generate-code
+	                      must be a keyword/value list
+		(wsdl-bind-operation): when  :respose==:symbol, then return type
+	                     in call to export must be the symbol, not the string
+	* xmp-wsdl.cl (wsdl-slots-of-type-spec): allow any sequence collector
+	                 at the top-level of element type
+	             (wsdl-emit-object-classes): emit :error in call to soap-result-typed
+	                 only in the most strict cases [spr32806]
+
 2007-03-10    <mm@PROA>
 
 	* xmp-wsdl.cl (wsdl-report-imports): new method to report included
@@ -615,4 +626,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.24 $
+$Revision: 2.25 $

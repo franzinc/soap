@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.14 2007/03/10 23:43:47 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.15 2007/03/20 01:17:17 mm Exp $
 
 ;; WSDL support
 
@@ -1529,7 +1529,10 @@
 		  (push `(,(qt op-name) ,(qt in-elts)
 			  ,@(when action (list :action action))
 			  :lisp-name (list ,(qt def-name) ,@key-list)
-			  :return ,(string ret-name))
+			  :return ,(if (eq :symbol (wsdl-option conn :response))
+				       ret-name
+				     (string ret-name))
+			  )
 			(wsdl-server-exports conn))
 		  (setf comment
 			(list* (format nil "Handler for message ~A" op-name)
@@ -2243,9 +2246,10 @@
 				:start (list 'list :port
 					     (wsdl-file-local-name conn "port"))
 				:enable :start
-				:publish `(net.uri:uri-path  ;;; rfe6782 
-					   (net.uri:parse-uri
-					    ,(wsdl-url-name conn)))
+				:publish `(list :path
+						(net.uri:uri-path  ;;; rfe6782 
+						 (net.uri:parse-uri
+						  ,(wsdl-url-name conn))))
 				
 				:lisp-package :keyword
 				(append 
@@ -2537,8 +2541,9 @@
 
 (defmethod wsdl-slots-of-type-spec ((conn wsdl-file-connector) spec)
   (with-tree-match
-   (spec (:complex (:seq* (:?each slots (:element . :?any))) . :?any))
-   (values t slots)))
+   (spec (:complex ((:? collector (:?or :seq :seq* :set :set* :seq+ :set+))
+		    (:?each slots (:element . :?any))) . :?any))
+   (values t slots collector)))
 
 (defmethod wsdl-atype-of-type-spec ((conn wsdl-file-connector) spec)
   (with-tree-match
@@ -2590,7 +2595,7 @@
 	       elt elts readers writers keys names etypes)
 	  (setf new-name (wsdl-constructor conn type-name))
 	  (or
-	   (multiple-value-bind (r slots)
+	   (multiple-value-bind (r slots collector)
 	       (wsdl-slots-of-type-spec conn type)
 	     (when (and r slots)
 
@@ -2654,7 +2659,10 @@
 					      (qt etype)
 					      (case (wsdl-option conn :sequence)
 						(:set* nil)
-						(otherwise :error))
+						(otherwise
+						 (case collector
+						   ((:set+ :seq+) :error)
+						   (otherwise nil))))
 					      (string elt)))))
 			 keys elts etypes))))
 		:mode :object-decoder :info :top-level)
