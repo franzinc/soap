@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2005 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2007 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-mtest.cl,v 2.2 2006/08/28 20:27:06 mm Exp $
+;; $Id: xmp-mtest.cl,v 2.3 2007/04/17 21:50:41 layer Exp $
 
 ;; Test cases for XML decoder
 

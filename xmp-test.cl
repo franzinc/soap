@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: user -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2005 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2007 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.13 2007/01/16 00:18:25 mm Exp $
+;; $Id: xmp-test.cl,v 2.14 2007/04/17 21:50:41 layer Exp $
 
 ;; Internal-use test cases
 

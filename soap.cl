@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: user -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2005 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2007 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soap.cl,v 2.9 2007/01/17 18:32:18 layer Exp $
+;; $Id: soap.cl,v 2.10 2007/04/17 21:50:41 layer Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
 

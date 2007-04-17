@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp.soap -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2005 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2007 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.15 2007/03/20 01:17:17 mm Exp $
+;; $Id: xmp-wsdl.cl,v 2.16 2007/04/17 21:50:41 layer Exp $
 
 ;; WSDL support
 
