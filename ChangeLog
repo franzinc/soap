@@ -1,3 +1,8 @@
+2007-05-01    <mm@PROA>
+
+	* soapex.cl: add timeout to most examples  [bug16944]
+	     and comment about external services
+
 2007-03-19    <mm@PROA>
 
 	* xmp-wsdl.cl (wsdl-make-interface): :publish argument to wsdl-generate-code
@@ -626,4 +631,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.25 $
+$Revision: 2.26 $

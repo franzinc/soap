@@ -17,9 +17,13 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soapex.cl,v 2.5 2007/04/17 21:50:41 layer Exp $
+;; $Id: soapex.cl,v 2.6 2007/05/01 20:50:38 layer Exp $
 
 ;; SOAP client examples
+
+;;; NOTE: These examples attempt to communicate with servers that existed at one
+;;; time and may still exist, but the servers are not controlled by Franz Inc. and
+;;; therefore their existence and behavior is subject to change.
 
 (in-package :user)
 
@@ -33,30 +37,28 @@
 (defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
 (defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
 
-
+(defvar *last-soap-conn* nil)
 
 ;; This service does not seem to ever work
-(defun sp01 (&key (debug *soap-client-debug*))
+(defun sp01 (&key (debug *soap-client-debug*) (timeout 30))
 
   ;; Sometimes fails: "getCurrentTime" not defined (may be server problem).
 
   (let* ((conn (soap-message-client 
-	       :url "http://time.soapware.org/currentTime"
-	       :soap-debug debug
-	       )))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element "getCurrentTime"
-			(:complex (:seq)
-				  :action "/currentTime"
-				  ))))
-      (list conn)))))
+		:url "http://time.soapware.org/currentTime"
+		:soap-debug debug
+		)))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout (timeout "Server did not respond.")
+      (call-soap-method
+       conn '(:element "getCurrentTime"
+		       (:complex (:seq)
+				 :action "/currentTime"
+				 ))))))
 
 (defpackage :temp (:use) (:export "getTemp"))
 (define-namespace :temp "temp" "urn:xmethods-Temperature")
-(defun sp10 (&key (zip "98325") (debug *soap-client-debug*))
+(defun sp10 (&key (zip "98325") (debug *soap-client-debug*) (timeout 30))
 
   ;; http://www.xmethods.net/sd/2001/TemperatureService.wsdl
 
@@ -64,18 +66,16 @@
 	       :lisp-package :keyword
 	       :decode-flag nil :soap-debug debug
 	       :url "http://services.xmethods.net:80/soap/servlet/rpcrouter")))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element temp:|getTemp|
-			(:complex (:seq (:element "zipcode" xsd:|string|))
-				  :action ""
-				  :namespaces (nil (:temp))
-				  ))
-	:|zipcode| zip
-	))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout (timeout "Server did not respond.")
+      (call-soap-method
+       conn '(:element temp:|getTemp|
+		       (:complex (:seq (:element "zipcode" xsd:|string|))
+				 :action ""
+				 :namespaces (nil (:temp))
+				 ))
+       :|zipcode| zip
+       ))))
 
 
 
@@ -90,28 +90,29 @@
 			      ))
 (define-namespace :baseball nil "http://webservices.empowered.com/StatsWS/DataService")
 
-(defun sp21 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8)))
+(defun sp21 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8))
+		  (timeout 30))
 
   (let ((conn (soap-message-client 
 	       :url "http://webservices.empowered.com/statsws/stats.asmx"
 	       :encoding-style nil :soap-debug debug
 	       :xml-encoding encoding 
 	       )))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element
-	       baseball:|GetTeams|
-	       (:complex
-		(:seq)
-		:action
-		"http://webservices.empowered.com/StatsWS/DataService/GetTeams"
-		:namespaces (:baseball)
-		))))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout
+     (timeout "Server did not respond.")
+     (call-soap-method
+      conn '(:element
+	     baseball:|GetTeams|
+	     (:complex
+	      (:seq)
+	      :action
+	      "http://webservices.empowered.com/StatsWS/DataService/GetTeams"
+	      :namespaces (:baseball)
+	      ))))))
 
-(defun sp22 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8)))
+(defun sp22 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8))
+		  (timeout 30))
 
   ;;  sending message nearly identical to sample on web
 
@@ -120,19 +121,18 @@
 	       :encoding-style nil :soap-debug debug
 	       :xml-encoding encoding
 	       )))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element
-	       baseball:|GetPlayers|
-	       (:complex
-		(:seq)
-		:action
-		"http://webservices.empowered.com/StatsWS/DataService/GetPlayers"
-		:namespaces (:baseball)
-		))))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout
+     (timeout "Server did not respond.")
+     (call-soap-method
+      conn '(:element
+	     baseball:|GetPlayers|
+	     (:complex
+	      (:seq)
+	      :action
+	      "http://webservices.empowered.com/StatsWS/DataService/GetPlayers"
+	      :namespaces (:baseball)
+	      ))))))
 
 
 
@@ -142,25 +142,25 @@
 (define-soap-element nil
   'temp:|getRateResponse|
   '(:complex (:seq (:element "Result" xsd:|float|))))
-(defun sp30 (&key (debug *soap-client-debug*) (country1 "Canada") (country2 "USA"))
+(defun sp30 (&key (debug *soap-client-debug*) (country1 "Canada") (country2 "USA")
+		  (timeout 30))
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword :soap-debug debug
 	       :url "http://services.xmethods.net:80/soap")))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element temp:|getRate|
-			(:complex (:seq (:element "country1" xsd:|string|)
-					(:element "country2" xsd:|string|)
-					)
-				  :action ""
-				  :namespaces
-				  (nil (:temp "tns" "urn:xmethods-CurrencyExchange"))
-				  ))
-	:|country1| country1 :|country2| country2
-	))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout
+     (timeout "Server did not respond.")
+     (call-soap-method
+      conn '(:element temp:|getRate|
+		      (:complex (:seq (:element "country1" xsd:|string|)
+				      (:element "country2" xsd:|string|)
+				      )
+				:action ""
+				:namespaces
+				(nil (:temp "tns" "urn:xmethods-CurrencyExchange"))
+				))
+      :|country1| country1 :|country2| country2
+      ))))
 
 
 
@@ -171,22 +171,21 @@
 (defpackage :temp (:use) (:export "getVersion" "Result"))
 (define-soap-element nil "getVersionResponse"
   '(:complex (:seq (:element "Result" xsd:|string|))))
-(defun sp40 (&key (debug *soap-client-debug*))
+(defun sp40 (&key (debug *soap-client-debug*) (timeout 30))
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword :soap-debug debug
 	       :url "http://arcweb.esri.com/services/v2/RouteFinder")))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element temp:|getVersion|
-			(:complex (:seq )
-				  :action "getVersion"
-				  :namespaces
-				  (nil (:temp "tns" "http://arcweb.esri.com/v2"))
-				  ))
-	))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout
+     (timeout "Server did not respond.")
+     (call-soap-method
+      conn '(:element temp:|getVersion|
+		      (:complex (:seq )
+				:action "getVersion"
+				:namespaces
+				(nil (:temp "tns" "http://arcweb.esri.com/v2"))
+				))
+      ))))
 
 
 
@@ -220,58 +219,57 @@
 					   "Ingredients"
 					   ))))))))))))
 (define-soap-element nil "Ingredients" '(:complex (:seq* (:any))))
-(defun sp51 (&key (debug *soap-client-debug*) (criteria "fried eggplant") (pg 0))
+(defun sp51 (&key (debug *soap-client-debug*) (criteria "fried eggplant") (pg 0)
+		  (timeout 30))
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword :soap-debug debug
 	       :xml-encoding (list :utf8-base :utf-8)
 	       :url "http://icuisine.net/webservices/RecipeService.asmx")))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element temp:|SearchRecipes|
-			(:complex (:seq (:element "criteria" xsd:|string|)
-					(:element "pageNumber" xsd:|int|)
-					(:element "serviceID" xsd:|int|)
-					(:element "email" xsd:|string|)
-					)
-				  :action
-				  "http://www.icuisine.net/webservices/SearchRecipes"
-				  :namespaces
-				  ("http://www.icuisine.net/webservices"
-				   (:temp 
-				    nil
-				    "http://www.icuisine.net/webservices"))
-				  ))
-	:|criteria| criteria :|pageNumber| pg :|serviceID| 0 :|email| "foo"
-	))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout
+     (timeout "Server did not respond.")
+     (call-soap-method
+      conn '(:element temp:|SearchRecipes|
+		      (:complex (:seq (:element "criteria" xsd:|string|)
+				      (:element "pageNumber" xsd:|int|)
+				      (:element "serviceID" xsd:|int|)
+				      (:element "email" xsd:|string|)
+				      )
+				:action
+				"http://www.icuisine.net/webservices/SearchRecipes"
+				:namespaces
+				("http://www.icuisine.net/webservices"
+				 (:temp 
+				  nil
+				  "http://www.icuisine.net/webservices"))
+				))
+      :|criteria| criteria :|pageNumber| pg :|serviceID| 0 :|email| "foo"
+      ))))
 
-(defun sp52 (&key (debug *soap-client-debug*) id)
+(defun sp52 (&key (debug *soap-client-debug*) id (timeout 30))
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword :soap-debug debug
 	       :xml-encoding (list :utf8-base :utf-8)
 	       :url "http://icuisine.net/webservices/RecipeService.asmx")))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method
-	conn '(:element temp:|GetRecipe|
-			(:complex (:seq (:element "guid" xsd:|string|)
-					(:element "serviceID" xsd:|int|)
-					(:element "email" xsd:|string|)
-					)
-				  :action
-				  "http://www.icuisine.net/webservices/GetRecipe"
-				  :namespaces
-				  ("http://www.icuisine.net/webservices"
-				   (:temp 
-				    nil
-				    "http://www.icuisine.net/webservices"))
-				  ))
-	:guid id :serviceID 0 :email "foo"
-	))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (sys:with-timeout
+     (timeout "Server did not respond.")
+     (call-soap-method
+      conn '(:element temp:|GetRecipe|
+		      (:complex (:seq (:element "guid" xsd:|string|)
+				      (:element "serviceID" xsd:|int|)
+				      (:element "email" xsd:|string|)
+				      )
+				:action
+				"http://www.icuisine.net/webservices/GetRecipe"
+				:namespaces
+				("http://www.icuisine.net/webservices"
+				 (:temp 
+				  nil
+				  "http://www.icuisine.net/webservices"))
+				))
+      :guid id :serviceID 0 :email "foo"
+      ))))
 
 
 
@@ -346,21 +344,18 @@
 	       :url "http://api.google.com/search/beta2"
 	       :lisp-package :keyword :soap-debug debug  :decode-flag decode
 	       )))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method conn
-			'gg:|doGoogleSearch|
-			:|key| *google-key*
-			:|q|   q
-			:|start| 0
-			:|maxResults| 10
-			:|filter| "true"
-			:|safeSearch| "true"
-			:|ie| "latin1"
-			:|oe| "latin1"
-			))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (call-soap-method conn
+		      'gg:|doGoogleSearch|
+		      :|key| *google-key*
+		      :|q|   q
+		      :|start| 0
+		      :|maxResults| 10
+		      :|filter| "true"
+		      :|safeSearch| "true"
+		      :|ie| "latin1"
+		      :|oe| "latin1"
+		      )))
 
 
 (defun gsp (&key (debug *soap-client-debug*) (phrase "common lisp s-expresion")
@@ -373,15 +368,12 @@
 	       :url "http://api.google.com/search/beta2"
 	       :lisp-package :keyword :soap-debug debug :decode-flag decode
 	       )))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method conn
-			'gg:|doSpellingSuggestion|
-			:|key| *google-key*
-			:|phrase| phrase
-			))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (call-soap-method conn
+		      'gg:|doSpellingSuggestion|
+		      :|key| *google-key*
+		      :|phrase| phrase
+		      )))
 
 
 (defun gcp (&key (debug *soap-client-debug*) (url "http://www.franz.com") (decode nil))
@@ -393,15 +385,12 @@
 	       :url "http://api.google.com/search/beta2"
 	       :lisp-package :keyword :soap-debug debug  :decode-flag decode
 	       )))
-    (values-list
-     (append
-      (multiple-value-list
-       (call-soap-method conn
-			'gg:|doGetCachedPage|
-			:|key| *google-key*
-			:|url| url
-			))
-      (list conn)))))
+    (setf *last-soap-conn* conn)
+    (call-soap-method conn
+		      'gg:|doGetCachedPage|
+		      :|key| *google-key*
+		      :|url| url
+		      )))
 
 
 
