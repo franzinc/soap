@@ -1,3 +1,9 @@
+2007-06-25    <mm@PROA>
+
+	* xmp-wsdl.cl (wsdl-add-form): NEW exported function
+	       (wsdl-index-form): add new mode :user to identify code inserted with
+	                           wsdl-add-form
+	
 2007-05-01    <mm@PROA>
 
 	* soapex.cl: add timeout to most examples  [bug16944]
@@ -631,4 +637,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.26 $
+$Revision: 2.27 $

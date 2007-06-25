@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-wsdl.cl,v 2.16 2007/04/17 21:50:41 layer Exp $
+;; $Id: xmp-wsdl.cl,v 2.17 2007/06/25 19:31:30 mm Exp $
 
 ;; WSDL support
 
@@ -57,6 +57,7 @@
    #:*wsdl-debug*
 
    #:wsdl-post-process
+   #:wsdl-add-form
    #:wsdl-props
    #:wsdl-maybe-conflicts
    #:wsdl-compose-name
@@ -1873,37 +1874,44 @@
 
 
 
+(defmethod wsdl-add-form  ((conn wsdl-file-connector) form &rest comments)
+  ;; exported function to add code
+  ;; skip call to wsdl-generate-codde for these forms
+  (wsdl-index-form conn form :mode :user :comment comments))
 
 (defmethod wsdl-index-form ((conn wsdl-file-connector) form &key mode info op comment
 			    &aux comm2 (comments (when comment
 						   (if (consp comment)
 						       comment
 						     (list comment)))))
-  (multiple-value-setq (form comm2)
-    ;; [rfe6553]
-    (apply #'wsdl-generate-code conn mode info
-	   (or op (when (consp form) (first form)))
-	   (if (consp form) (cdr form) (list form))))
-  (when comm2
-    (setf comments (append comments (if (consp comm2)
-					comm2
-				      (list comm2)))))
-  (when (and (wsdl-option conn :generate-comments)
-	     (consp form) (eq 'if (first form)) (null (second form)))
-    (let* ((*print-pretty* nil)
-	   (w (third form))
-	   (ws (format nil "~S" w))
-	   (out (fourth form))
-	   (ln (length ws)))
-      (cond ((< ln 100))
-	    (t (setf ws (format nil "(~S <conn> ~S ~S ~S ...)" 
-				(first w) (third w) (fourth w) (fifth w)))
-	       (setf ln (length ws))
-	       (cond ((< ln 100))
-		     ( t (setf ws (format nil "(w-g-c <conn> ~S ~S ~S ...)" 
-					  (third w) (fourth w) (fifth w)))))))
-      (setf comments (append comments (list ws)))
-      (setf form out)))
+  (case mode
+    (:user nil)
+    (otherwise
+     (multiple-value-setq (form comm2)
+       ;; [rfe6553]
+       (apply #'wsdl-generate-code conn mode info
+	      (or op (when (consp form) (first form)))
+	      (if (consp form) (cdr form) (list form))))
+     (when comm2
+       (setf comments (append comments (if (consp comm2)
+					   comm2
+					 (list comm2)))))
+     (when (and (wsdl-option conn :generate-comments)
+		(consp form) (eq 'if (first form)) (null (second form)))
+       (let* ((*print-pretty* nil)
+	      (w (third form))
+	      (ws (format nil "~S" w))
+	      (out (fourth form))
+	      (ln (length ws)))
+	 (cond ((< ln 100))
+	       (t (setf ws (format nil "(~S <conn> ~S ~S ~S ...)" 
+				   (first w) (third w) (fourth w) (fifth w)))
+		  (setf ln (length ws))
+		  (cond ((< ln 100))
+			( t (setf ws (format nil "(w-g-c <conn> ~S ~S ~S ...)" 
+					     (third w) (fourth w) (fifth w)))))))
+	 (setf comments (append comments (list ws)))
+	 (setf form out)))))
   (with-slots
    (def-list sub-list def-index) conn
    (etypecase form
