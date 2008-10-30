@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.14 2007/04/17 21:50:41 layer Exp $
+;; $Id: xmp-soap.cl,v 2.15 2008/10/30 15:49:43 layer Exp $
 
 ;; SOAP support
 
@@ -402,6 +402,8 @@
     ;; THESE SLOTS ARE NOT COPIED by xmp-copy methods
     (action :accessor soap-server-action :initarg :action :initform nil
 	    :documentation "no-xmp-copy")
+    
+    (wsdl  :accessor soap-server-wsdl :initarg :wsdl :initform nil)
 
     ;; these slots are set before calling soap-invoke-method
     (soap-server-message-method :accessor soap-server-message-method :initform nil
@@ -2292,6 +2294,28 @@
 (defmethod xmp-server-implementation ((server soap-aserve-server-connector) body
 				      &rest options &key action &allow-other-keys)
   (declare (ignore options))
+  
+  (if* (eq :get (net.aserve:request-method (net.xmp::aserve-request server)))
+     then (if* (net.aserve::request-query-value "wsdl"
+		(net.xmp::aserve-request server))
+		      
+	     then (setf (net.xmp::xmp-destination-content-type server) 
+		    "text/xml")
+		  (let ((wsdl (soap-server-wsdl server)))
+		    (if* wsdl
+		       then (setf (net.xmp::xmp-destination-content-type server) 
+			      "text/xml")
+			    (setf (net.xmp::xmp-message-string server)
+			      wsdl)
+			    
+		       else (setf (net.xmp::xmp-destination-content-type server) "text/html")
+			    (setf (net.xmp::xmp-message-string server) "<html><body>No wsdl specified</body></html>"))
+		    (return-from xmp-server-implementation nil)))
+	  
+	  (setf (net.xmp::xmp-destination-content-type server) "text/html")
+	  (setf (net.xmp::xmp-message-string server) "<html><body>Server Running</body></html>")
+	  (return-from xmp-server-implementation nil))
+  
   ;; parse an rpc call and pass it to the exported function
   (when (soap-debug-p server)
     (format t "~&Received SOAP message:~%")

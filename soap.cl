@@ -17,9 +17,15 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soap.cl,v 2.10 2007/04/17 21:50:41 layer Exp $
+;; $Id: soap.cl,v 2.11 2008/10/30 15:49:43 layer Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
+
+#+(version= 8 1)
+(sys:defpatch "soap" 1 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+  "v1: soap server returns wsdl if requested"
+  :type :system
+  :post-loadable t)
 
 #+(version= 8 0)
 (sys:defpatch "soap" 3 ;;; ALSO CHANGE: incf the # in build.cl & Makefile

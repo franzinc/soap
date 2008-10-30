@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.8 2007/01/17 18:32:18 layer Exp $
+# $Id: Makefile,v 2.9 2008/10/30 15:49:43 layer Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -50,6 +50,13 @@ soap.003: clean compile
 	mkdir DIST \
 	      DIST/code
 	cp -p soap.fasl DIST/code/soap.003
+
+# Latest 8.1 patch:
+soap.001: clean compile
+	rm -fr DIST DIST.src
+	mkdir DIST \
+	      DIST/code
+	cp -p soap.fasl DIST/code/soap.001
 
 clean: FORCE
 	rm -fr *.fasl *.out DIST DIST.src soap[am].cl
