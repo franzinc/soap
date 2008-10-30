@@ -1,7 +1,8 @@
 2008-10-30  Kevin Layer  <layer@gemini.franz.com>
 
 	* Makefile: soap.001
-	* build.cl: defpatch for 8.1
+	* build.cl: defpatch # for 8.1
+	* soap.cl: defpatch for 8.1
     from jkf:
 	* xmp-soap.cl: rfe8375: soap server should return wsdl if
 	  requested
@@ -645,4 +646,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.28 $
+$Revision: 2.29 $
