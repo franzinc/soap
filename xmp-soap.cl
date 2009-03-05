@@ -29,17 +29,7 @@
 (eval-when (compile eval)
   (defmacro soap-case-mode () *current-case-mode*))
 
-(eval-when (compile eval load)
-  (defmacro make-soap-version ()
-    (list 'quote
-	  (if (fboundp 'sys::version-from-file)
-	      (funcall 'sys::version-string-to-list
-		       (funcall 'sys::version-from-file "ChangeLog"))
-	    (list 1 3 1)))))
-
-
-
-(defparameter *soap-version* (make-soap-version))
+(defparameter *soap-version* '(1 3 1))
 (defvar *soap-server-debug* nil)
 (defvar *soap-client-debug* nil)
 
