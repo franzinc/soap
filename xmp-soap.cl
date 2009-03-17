@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.15 2008/10/30 15:49:43 layer Exp $
+;; $Id: xmp-soap.cl,v 2.16 2009/03/17 18:48:48 mm Exp $
 
 ;; SOAP support
 
@@ -1885,6 +1885,27 @@
   :check-type t
   )
 
+(defun soap-decode-float (data)
+  (if (null data)
+      0.0d0
+    (prog ((num (string-trim '(#\space #\tab #\newline #\return #\linefeed 
+			       #\rubout #\page #\backspace)
+			     data)) e v l)
+	  (cond ((equal num "") (return 0d0))
+		((or (setf e (position #\e num))
+		     (setf e (position #\E num)))
+		 (setf (elt num e) #\D))
+		((or (position #\d num) (position #\D num)))
+		(t (setf num (concatenate 'string num "d0"))))
+	  (setf v (ignore-errors (multiple-value-setq (v l) (read-from-string num)) v))
+	  (or (typep v 'double-float)
+	      (error "Cannot decode ~S to an xsd:float or xsd:double value." data))
+	  (when (< l (length num))
+	    (error
+	     "Decoding ~S  to an xsd:float or xsd:double value leaves residue at position ~A."
+	     num l))
+	  (return v))))
+
 (def-soap-simple-content ((enc "float") (xsd "float"))
   :class soap-connector
   :decode ((declare (ignore options))
@@ -1892,14 +1913,7 @@
 	   ;; Parse the input as a double float to retain excess precision 
 	   ;;  if it is there (some clients/servers ie soapware.org/validator1
 	   ;;  seem to send and expect double precision for xsd:float )
-	   (values (if (null data)
-		       0.0
-		     (read-from-string (case (length data)
-					 ((0 1 2 3 4 5 6 7 8 9 10)
-					  data)
-					 (otherwise		    
-					  (concatenate 'string data "d0")))
-				       nil nil))
+	   (values (soap-decode-float data)
 		   (xsd "float")))
   :encode ((declare (ignore options))
 	   (let (f d)
@@ -1933,11 +1947,8 @@
 (def-soap-simple-content ((enc "double") (xsd "double"))
   :class soap-connector
   :decode ((declare (ignore options))
-	   ;; Make sure that the data will be parsed as a double-float
-	   (values 
-	    (if (null data)
-		0
-	      (read-from-string (concatenate 'string data "d0") nil nil))))
+	   (values (soap-decode-float data)
+		   (xsd "double")))
   :encode ((declare (ignore options))
 	   (let ((f (coerce (or data 0) 'double-float)))
 	     (xmp-encode-content

@@ -1,3 +1,11 @@
+2009-03-17    <mm@FRIGATE>
+
+	* Makefile:  soap.002 ...
+	* soap.cl (defpatch): 
+	     set patch number to 2 for 8.1,  4 for 8.0,  6 for 7.0
+	* xmp-soap.cl (soap-decode-float): 
+	     new fn to decode float and double correctly [bug18350]
+	
 2008-10-30  Kevin Layer  <layer@gemini.franz.com>
 
 	* Makefile: soap.001
@@ -646,4 +654,4 @@ next join tag: use join2.sh
 	* (NEW) soap-client.htm
 
 *******************************************************************************
-$Revision: 2.29 $
+$Revision: 2.30 $

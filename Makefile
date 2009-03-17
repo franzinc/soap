@@ -1,4 +1,4 @@
-# $Id: Makefile,v 2.9 2008/10/30 15:49:43 layer Exp $
+# $Id: Makefile,v 2.10 2009/03/17 18:48:48 mm Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
@@ -38,25 +38,25 @@ DIST: FORCE
 	cp -p bignum-server.cl DIST/examples/soap
 
 # Latest 7.0 patch:
-soap.005: clean compile
+soap.006: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.005
+	cp -p soap.fasl DIST/code/soap.006
 
 # Latest 8.0 patch:
-soap.003: clean compile
+soap.004: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.003
+	cp -p soap.fasl DIST/code/soap.004
 
 # Latest 8.1 patch:
-soap.001: clean compile
+soap.002: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.001
+	cp -p soap.fasl DIST/code/soap.002
 
 clean: FORCE
 	rm -fr *.fasl *.out DIST DIST.src soap[am].cl

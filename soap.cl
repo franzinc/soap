@@ -17,32 +17,35 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: soap.cl,v 2.11 2008/10/30 15:49:43 layer Exp $
+;; $Id: soap.cl,v 2.12 2009/03/17 18:48:48 mm Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
 
 #+(version= 8 1)
-(sys:defpatch "soap" 1 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
-  "v1: soap server returns wsdl if requested"
+(sys:defpatch "soap" 2 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+  "v2: encode and decode float values correctly;
+v1: soap server returns wsdl if requested."
   :type :system
   :post-loadable t)
 
 #+(version= 8 0)
-(sys:defpatch "soap" 3 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+(sys:defpatch "soap" 4 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
   "v1: improved handling of nillable and anyType
 v2: <include> handling and many other extensions;
 v3: generate check-type with quoted typespec, message has one header element
     with one or more parts, WSDL simpleContent with extension generates
-    garbled def."
+    garbled def
+v4: encode and decode float values correctly."
   :type :system
   :post-loadable t)
 
 #+(version= 7 0)
-(sys:defpatch "soap" 5 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+(sys:defpatch "soap" 6 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
   "v1: bug fixes and improved handling of some SOAP messages;
 v3: bring up to ACL 8.0 level;
 v4: improved handling of nillable and anyType
-v5: <include> handling and many other extensions."
+v5: <include> handling and many other extensions
+v6: encode and decode float values correctly."
   :type :system
   :post-loadable t)
 
