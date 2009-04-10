@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-test.cl,v 2.14 2007/04/17 21:50:41 layer Exp $
+;; $Id: xmp-test.cl,v 2.15 2009/03/17 18:48:48 mm Exp $
 
 ;; Internal-use test cases
 
@@ -2214,9 +2214,45 @@ Individual tests:
 		 (:element "bool"  xsd:|boolean|)
 		 (:element "float"  xsd:|float|)
 		 (:element "dbl"  xsd:|double|)
+
+		 (:element "float-string"  xsd:|float|)
+		 (:element "dbl-string"  xsd:|double|)
 			  
 		 ))))
 	))
+    (define-soap-type nil :soap001c
+      '(:complex
+	(:seq (:element
+	       "parts"
+	       (:complex
+		(:seq
+		 (:element "str" xsd:|string|)
+		 (:element "qnm" xsd:|QName|) ;;; needs different test???
+		 (:element "b64" xsd:|base64Binary|) ;;;needs different test???
+		 (:element "dec" xsd:|decimal|)
+		 (:element "long" xsd:|long|)
+		 (:element "ulong" xsd:|unsignedLong|)
+		 (:element "int"  xsd:|int|)
+		 (:element "uint"  xsd:|unsignedInt|)
+		 (:element "integer" xsd:|integer|)
+		 (:element "nonpos" xsd:|nonPositiveInteger|)
+		 (:element "nonneg"  xsd:|nonNegativeInteger|)
+		 (:element "neg"   xsd:|negativeInteger|)
+		 (:element "pos" xsd:|positiveInteger|)
+		 (:element "short" xsd:|short|)
+		 (:element "byte"  xsd:|byte|)
+		 (:element "ushort"  xsd:|unsignedShort|)
+		 (:element "ubyte" xsd:|unsignedByte|)
+		 (:element "bool"  xsd:|boolean|)
+		 (:element "float"  xsd:|float|)
+		 (:element "dbl"  xsd:|double|)
+
+		 (:element "float-string"  xsd:|string|)
+		 (:element "dbl-string"  xsd:|string|)
+			  
+		 ))))
+	))
+
     (define-soap-element nil "msg000" 
       '(:complex (:seq (:element "parts" (:complex (:seq* (:any)))))))
     (define-soap-element nil "res000" 
@@ -2252,8 +2288,11 @@ Individual tests:
 		 (format nil ":prefix - ~A" args))
 		((cddr parts)
 		 (format nil ":suffix - ~A" args))
-		((consp (second parts))
-		 (format nil ":parts ~{~A  ~}" (second parts)))
+		((and (consp (second parts)) (null (cdr (second parts)))
+		      (consp (first (second parts))))
+		 (let* ((arg (first (second parts)))
+			(elt (first arg)) (val (second arg)))
+		   (format nil ":parts ~A ~A ~A " elt val (type-of val))))
 		(t (format nil ":odd - ~S" (second parts)))))))
 
 (defun ts1001 (&key debug keep i log)
@@ -2269,113 +2308,222 @@ Individual tests:
 				     :soap-debug (ts-debug :client debug)
 				     ))
      (let* ((msg 
-	     ;; Encode the element with the type specs in :soap001
-	     ;;  but msg000 is defined as any content, so decode with
-	     ;;  default decoders.
-	     (list :element "msg000" :soap001))
-	    expected decoded res (j 0))
+	     ;; Encode the element with the type specs in :soap001c
+	     ;;  where xxx-string components are sent from hand-coded
+	     ;;  string data but decoded as xsd types.
+	     (list :element "msg001" :soap001c))
+	    expected res (j 0))
        (dolist (parts
 		`(
 		  ;; (sub-elt content)
-		  ;; ((sub-elt content) e1 e2
-		  ;;           e1 is expected result with default decoding
-		  ;;           e2 is expected result eith explicit decoding
+		  ;; ((sub-elt content) e1
+		  ;;           e1 is expected result
 		  ;;           :call-error -- expect an error
-		  ;;           :none       -- skip this test
+
+		  ;;0
 		  ("str" "only a string")
-		  (("str" "")  ":parts (str)  " ":parts (str )  ") ;;; empty string
-		  (("str" nil) ":parts (str)  " ":parts (str )  ")
+
+		  ;;1
+		  (("str" "")  ":parts str  (simple-array character (0)) ") ;;; empty string
+
+		  ;;2
+		  (("str" nil) ":parts str  (simple-array character (0)) ")
+
+		  ;;3
 		  (("qnm" xsd:|string|)
-		   ":parts (qnm xsd:string)  "  ":parts (qnm string)  ")
+		   ":parts qnm string symbol ")
+
+		  ;;4
 		  ("dec" 12345)
+
+		  ;;5
+		  (("dec" nil) ":parts dec 0 fixnum ")
+
+		  ;;6
+		  (("dec" :foo) :call-error)
+		  
+		  ;;7
+		  ("long" 12345678)
+
+		  ;;8
+		  (("long" nil) ":parts long 0 fixnum ")
+
+		  ;;9
+		  ("ulong" 12345678)
+
+		  ;;10
+		  (("ulong" nil) ":parts ulong 0 fixnum ")
+
+		  ;;11
+		  (("ulong" -5) :call-error :none fixnum)
+
+		  ;;12
+		  ("int" 234)
+
+		  ;;13
+		  (("int" nil) ":parts int 0 fixnum ")
+
+		  ;;14
+		  ("uint" 234)
+
+		  ;;15
+		  (("uint" nil) ":parts uint 0 fixnum ")
+
+		  ;;16
+		  ("integer" 234)
+
+		  ;;17
+		  (("integer" nil) ":parts integer 0 fixnum ")
+
+		  ;;18
+		  ("nonpos" -456)
+
+		  ;;19
+		  ("nonpos" 0)
+
+		  ;;20
+		  (("nonpos" nil) ":parts nonpos 0 fixnum ")
+
+		  ;;21
+		  ("nonneg" 776)
+
+		  ;;22
+		  ("nonneg" 0)
+
+		  ;;23
+		  (("nonneg" nil) ":parts nonneg 0 fixnum ")
+
+		  ;;24
+		  ("neg" -888)
+
+		  ;;25
+		  ("pos" 345)
+
+		  ;;26
+		  (("pos" nil) ":parts pos 0 fixnum ")
+
+		  ;;27
+		  ("short" 1234)
+
+		  ;;28
+		  ("short" -1234)
+
+		  ;;29
+		  ("byte" 127)
+
+		  ;;30
+		  ("byte" -127)
+
+		  ;;31
+		  (("byte" 1278) :call-error)
+
+		  ;;32
+		  (("byte" 128) :call-error)
+
+		  ;;33
+		  (("byte" -129) :call-error)
+
+		  ;;34
+		  ("ushort" 1234)
+
+		  ;;35
+		  (("ushort" -8) :call-error)
+
+		  ;;36
+		  ("ubyte" 127)
+
+		  ;;37
+		  (("ubyte" -9) :call-error)
+
+		  ;;38
+		  (("ubyte" 256) :call-error)
+
+		  ;;39
+		  (("bool" 1)   ":parts bool t symbol ")
+
+		  ;;40
+		  (("bool" t)   ":parts bool t symbol ")
+
+		  ;;41
+		  (("bool" 0)   ":parts bool t symbol ")
+
+		  ;;42
+		  (("bool" nil) ":parts bool nil null ")
+
+		  ;;43
+		  (("float-string" "76.5152e3")
+		   ":parts float-string 76515.2d0 double-float ")
+
+		  ;;44
+		  (("float" 123.456) ":parts float 123.456d0 double-float ")
+
+		  ;;45
+		  (("float" 23.456e17) ":parts float 2.3456d+18 double-float ")
+
+		  ;;46
+		  (("float" 321.456e27) ":parts float 3.21456d+29 double-float ")
+
+		  ;;47
+		  (("float" 234.456e-3) ":parts float 0.234456d0 double-float ")
+
+		  ;;48
+		  (("float" -123.456E-3) ":parts float -0.123456d0 double-float ")
+
+		  ;;49
+		  (("dbl" 123.456) ":parts dbl 123.45600128173828d0 double-float ")
+
+		  ;;50
+		  (("dbl" 23.456d11)   ":parts dbl 2.3456d+12 double-float ")
+
+		  ;;51
+		  (("dbl" 1235.456e5)  ":parts dbl 1.235456d+8 double-float ")
+
+		  ;;52
+		  (("dbl" 223.456D-4)  ":parts dbl 0.0223456d0 double-float ")
+		 
+		  ;;53
+		  (("float-string" "12345678.123456e0")
+		   ":parts float-string 1.2345678123456d+7 double-float ")
+
+		  ;;54
+		  (("dbl-string" "77.123e0") ":parts dbl-string 77.123d0 double-float ")
 
 		  ;;("dec" 123.45)
 		  ;;("dec" 123/45)
-					   
-		  (("dec" nil) ":parts (dec 0)  ")
-		  (("dec" :foo) :call-error :none)
-		  ("long" 12345678)
-		  (("long" nil) ":parts (long 0)  ")
-		  ("ulong" 12345678)
-		  (("ulong" nil) ":parts (ulong 0)  ")
-		  (("ulong" -5) :call-error :none)
-		  ("int" 234)
-		  (("int" nil) ":parts (int 0)  ")
-		  ("uint" 234)
-		  (("uint" nil) ":parts (uint 0)  ")
-		  ("integer" 234)
-		  (("integer" nil) ":parts (integer 0)  ")
-		  ("nonpos" -456)
-		  ("nonpos" 0)
-		  (("nonpos" nil) ":parts (nonpos 0)  ")
-		  ("nonneg" 776)
-		  ("nonneg" 0)
-		  (("nonneg" nil) ":parts (nonneg 0)  ")
-		  ("neg" -888)
-		  ("pos" 345)
-		  (("pos" nil) ":parts (pos 0)  ")
-		  ("short" 1234)
-		  ("short" -1234)
-		  ("byte" 127)
-		  ("byte" -127)
-		  (("byte" 1278) :call-error :none)
-		  (("byte" 128) :call-error :none)
-		  (("byte" -129) :call-error :none)
-		  ("ushort" 1234)
-		  (("ushort" -8) :call-error :none)
-		  ("ubyte" 127)
-		  (("ubyte" -9) :call-error :none)
-		  (("ubyte" 256) :call-error :none)
-		  (("bool" 1)   ":parts (bool true)  " (":parts (bool ~A)  " t))
-		  (("bool" t)   ":parts (bool true)  " (":parts (bool ~A)  " t))
-		  (("bool" 0)   ":parts (bool true)  " (":parts (bool ~A)  " t))
-		  (("bool" nil) ":parts (bool false)  " (":parts (bool ~A)  " nil))
-		 
-		  ("str" "string argument" "int" 123 "pos" 456)
+		
 		  ))
 	 (when (or (null i)
 		   (eql i j)
 		   (and (consp i) (member j i)))
+	   (when debug
+	     (format t "~&~%;BEGIN ~S ~%" parts))
 	   (cond ((consp (first parts))
 		  (setf expected (second parts))
-		  (when (consp (setf decoded (third parts)))
-		    (setf decoded (apply 'format nil decoded)))
 		  (setf parts (first parts)))
-		 (t (setf decoded nil expected nil)))
-	   (or expected (setf expected (format nil ":parts ~{(~A ~A)  ~}" parts)))
-	   (or decoded (setf decoded expected))
+		 (t (setf expected nil)))
+	   (or expected 
+	       (setf expected (format nil ":parts ~A ~A ~A " 
+				      (first parts) (second parts) (type-of (second parts))
+				      )))
 	   (or
 	    (case expected
 	      (:call-error
 	       (test-error
 		(call-soap-method conn msg "parts" parts)
-		:fail-info (list* key j :encode parts)))
+		:fail-info (list* key j :default parts)))
 	      (otherwise
 	       (test-no-error
 		(setf res (soap-result-part 
 			   conn (call-soap-method conn msg "parts" parts)
 			   "res000" "return"))
-		:fail-info (list* key j :encode parts))))
+		:fail-info (list* key j :default parts))))
 	    (setf ok nil))
 	   (or
 	    (eq expected :call-error)
 	    (test expected res :test #'equal
-		  :fail-info (list* key j :encoded parts))
+		  :fail-info (list* key j :default parts))
 	    (setf ok nil))
-	   (or
-	    (case decoded
-	      (:none t)
-	      (otherwise
-	       (test-no-error
-		(setf res (soap-result-part 
-			   conn (call-soap-method conn "msg001" "parts" parts)
-			   "res000" "return"))
-		:fail-info (list* key j :decode parts))))
-	    (setf ok nil))
-	   (or
-	    (eq decoded :none)
-	    (test decoded res :test #'equal :fail-info (list* key j :decoded parts))
-	    (setf ok nil))
+	   
 	   )
 	
 	 (incf j)
