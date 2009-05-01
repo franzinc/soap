@@ -1,6 +1,12 @@
-2009-03-05  Kevin Layer  <layer@gemini.franz.com>
+*******************************************************************************
+*** LEAVE THIS AT THE TOP OF THE FILE ***
+don't forget to change the version in code/xversion.cl if you do anything
+user visible.
+*******************************************************************************
 
-	* xmp-soap.cl: remove use of version-from-file
+2009-05-01  Kevin Layer  <layer@gemini.franz.com>
+
+	* xmp-soap.cl: don't use version-from-file
 
 2009-03-17    <mm@FRIGATE>
 
@@ -656,6 +662,3 @@ next join tag: use join2.sh
 2003-07-23  Kevin Layer  <layer@crikey>
 
 	* (NEW) soap-client.htm
-
-*******************************************************************************
-$Revision: 2.30 $

@@ -17,7 +17,7 @@
 ;; Commercial Software developed at private expense as specified in
 ;; DOD FAR Supplement 52.227-7013 (c) (1) (ii), as applicable.
 
-;; $Id: xmp-soap.cl,v 2.16 2009/03/17 18:48:48 mm Exp $
+;; $Id: xmp-soap.cl,v 2.17 2009/05/01 16:03:53 layer Exp $
 
 ;; SOAP support
 
@@ -29,7 +29,7 @@
 (eval-when (compile eval)
   (defmacro soap-case-mode () *current-case-mode*))
 
-(defparameter *soap-version* '(1 3 1))
+(defparameter *soap-version* '(2 31 0))
 (defvar *soap-server-debug* nil)
 (defvar *soap-client-debug* nil)
 
