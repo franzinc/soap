@@ -2573,9 +2573,11 @@
     ;; First, collect all defined structs.
     (multiple-value-bind (type-name type)
 	(wsdl-type-of-type-def conn (first def))
-      (when (and type-name type (wsdl-slots-of-type-spec conn type))
-	(when (wsdl-query-redef conn type-name :type)
-	  (pushnew type-name defclass-names)))))
+      (multiple-value-bind (r slots)
+	  (wsdl-slots-of-type-spec conn type)
+	(when (and type-name type r slots)
+	  (when (wsdl-query-redef conn type-name :type)
+	    (pushnew type-name defclass-names))))))
   (dolist (def defs)
     ;; Then, collect all defined arrays.
     (multiple-value-bind (type-name type)
@@ -2594,7 +2596,10 @@
     (multiple-value-bind (type-name type)
 	(wsdl-type-of-type-def conn (first def))
 
-      (when (and type-name type (wsdl-query-redef conn type-name :type))
+      (when (and type-name type (wsdl-query-redef conn type-name :type)
+		 ;; Generate code only for the types collected in the 
+		 ;;  previous loops over the defs.
+		 (member type-name defclass-names))
 	(when (null encoder)
 	  (setf encoder (wsdl-encoder conn :prototype type-name))
 	  (setf (wsdl-encoder-name conn) encoder))

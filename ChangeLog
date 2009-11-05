@@ -4,6 +4,28 @@ don't forget to change the version in code/xversion.cl if you do anything
 user visible.
 *******************************************************************************
 
+2009-11-04  mm  <mm@franz.com>
+
+	* soapex.cl: 
+	    add comment about defunct services
+	    comment out services that no longer exist
+	    (sp40gen): build client from wsdl
+	* xmp-soap.cl: 
+	    (xmp-call-method): 
+	       add quotes to SOAPAction header [rfe8861]
+	    (xmp-call-method): 
+	     peek for xmldecl but do not require it [bug17614]
+	     peek for Envelope element as well
+	* xmp-test.cl: 
+	    (ss1): add test to retrieve wsdl  [rfe8375]
+	    (ss1): add test for non-SOAP reply
+	    (test-clients): call sp40gen
+	* xmp-wsdl.cl: 
+	    (wsdl-emit-object-classes): 
+	     Do not generate accessors for types that do not get a 
+	     class definition, such as types with no components.
+
+
 2009-05-01  Kevin Layer  <layer@gemini.franz.com>
 
 	* xmp-soap.cl: don't use version-from-file

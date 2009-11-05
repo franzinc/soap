@@ -372,7 +372,17 @@ Individual tests:
 				      :message-dns '(nil (:ss1))
 				      :soap-debug (ts-debug :server debug)
 				      :url url
+				      :wsdl "<def/>"
 				      )))
+    ;; Define a non-SOAP response from the server to test 
+    ;;  the fix for bug17614.
+    (net.aserve:publish :path (format nil "~Ax" path)
+			:function #'(lambda (req ent)
+				      (net.aserve:with-http-response
+				       (req ent)
+				       (net.aserve:with-http-body
+					(req ent)
+					(net.html.generator:html (:body "body"))))))
 
     (soap-export-method server 'ss1::soap-method-1 '(:|elt1| :|elt2| :|elt3|)
 			:return 'ss1::soap-result-1
@@ -412,17 +422,55 @@ Individual tests:
 					 (list 'ss1::result
 					       (+ (or e1 0) (or e2 0) (or e3 0))))))
 		      t)))
-	  (let* ((client (soap-message-client :url url
-					      :lisp-package :keyword
-					      :message-dns '(nil (:ss1))
-					      :soap-debug (ts-debug :client debug)
-					      ))
-		 (result
-		  (and  (one client index 0 111 222 333)
-			(one client index 1 123 nil nil)
-			(one client index 2 nil 456 nil)
-			(one client index 3 nil nil 789))))		  
-	    (values result server client net.xmp.soap::*soap-last-server*)
+	  (let ((r1
+		 (let* ((client (soap-message-client :url url
+						     :lisp-package :keyword
+						     :message-dns '(nil (:ss1))
+						     :soap-debug (ts-debug :client debug)
+						     ))
+			(result
+			 (and  (one client index 0 111 222 333)
+			       (one client index 1 123 nil nil)
+			       (one client index 2 nil 456 nil)
+			       (one client index 3 nil nil 789))))		  
+		   (list result server client net.xmp.soap::*soap-last-server*)
+		   ))
+		(r2
+		 (let* ((client (soap-message-client :url url
+						     :lisp-package :keyword
+						     :message-dns '(nil (:ss1))
+						     :soap-debug (ts-debug :client debug)
+						     ))
+			(result
+			 (and  (one client index 0 111 222 333)
+			       (one client index 1 123 nil nil)
+			       (one client index 2 nil 456 nil)
+			       (one client index 3 nil nil 789))))		  
+		   (list result server client net.xmp.soap::*soap-last-server*)
+		   ))
+		(r3
+		 (let* ((client (soap-message-client :url (format nil "~Ax" url) ;;; create a bad URL
+						     :lisp-package :keyword
+						     :message-dns '(nil (:ss1))
+						     :soap-debug (ts-debug :client debug)
+						     )))
+		   (multiple-value-bind (v e)
+		       (ignore-errors 
+			 (progn
+			   (call-soap-method client 'ss1::soap-method-1 :|elt2| 17)
+			   17))
+		     (list
+		      (and (null v) e (search "not a SOAP XML document" (format nil "~A" e)))
+		      v e))  ))
+		(r4 (multiple-value-bind 
+			(body rc)
+			(net.aserve.client:do-http-request    ;; test for wsdl [rfe8375]
+			 (format nil "~A?wsdl" url))
+		      (list (and (eql 200 rc)
+				 (equal "<def/>" body))
+			    rc body)))
+		)
+	    (values (and (first r1) (first r2) (first r3) (first r4)) r1 r2 r3 r4)
 	    ))
       (and stop server (stop-soap-server server)))
     ))
@@ -1029,7 +1077,7 @@ Individual tests:
 (defun test-clients (&key index (error-p nil) val-p (timeout 60)
 			  &aux (fail 0) answer)
 
-  (macrolet ((run-one (this body &optional expected)
+  (macrolet ((run-one (this body &optional (expected nil e-p))
 		      `(when (or (null index) (eql index ,this))
 			 (let ((res (mp:with-timeout
 				     (timeout :timeout)
@@ -1042,7 +1090,8 @@ Individual tests:
 					  v))))))
 			   (cond (val-p (setf answer res))
 				 ((eq res :timeout))
-				 (t (setf res (test-res res ',expected))))
+				 ,@(when e-p `((t (setf res (test-res res ',expected)))))
+				 )
 			   (format t "~&;;~2D. ~A~%" ,this res)))))
     (flet ((test-res (res ex &aux elt)
 		     (cond ((null (first res))
@@ -1059,16 +1108,17 @@ Individual tests:
 
 
       ;;(run-one 01 (sp01))
-      (run-one 10 (sp10) temp::|getTempResponse|)
+      ;;(run-one 10 (sp10) temp::|getTempResponse|)
       ;;(run-one 21 (sp21) baseball::|GetTeamsResponse|)
       ;;(run-one 22 (sp22) baseball::|GetPlayersResponse|)
-      (run-one 30 (sp30) temp::|getRateResponse|)
+      ;;(run-one 30 (sp30) temp::|getRateResponse|)
       (run-one 40 (sp40) temp::|getVersionResponse|)
+      (run-one '40g (sp40gen))
       ;;(run-one 51 (sp51) temp:|SearchRecipesResponse|)
       ;; (run-one 52 (sp52 id))
-      (run-one 61 (gs)  gg::|doGoogleSearchResponse|)
-      (run-one 62 (gsp) gg::|doSpellingSuggestionResponse|)
-      (run-one 63 (gcp) gg::|doGetCachedPageResponse|)
+      ;;(run-one 61 (gs)  gg::|doGoogleSearchResponse|)
+      ;;(run-one 62 (gsp) gg::|doSpellingSuggestionResponse|)
+      ;;(run-one 63 (gcp) gg::|doGetCachedPageResponse|)
 
       (format t "~%;;; ~S client tests failed.~%" fail)
       (if val-p (values-list answer) (eql 0 fail))

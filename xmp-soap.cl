@@ -1213,6 +1213,36 @@
 
   )
 
+(defun xmp-call-method-debug (conn where data)
+  (ecase where
+    (:before
+     (format t "~&Calling SOAP method:~%")
+     (format t "~&   destination URL: ~A~%" (xmp-destination-url conn))
+     (format t "~&       HTTP method: ~A~%" (net.xmp::xmp-destination-method conn))
+     (format t "~&     HTTP protocol: ~A~%"
+	     (net.xmp::xmp-destination-http-protocol conn))
+     (format t "~&      content-type: ~A~%"
+	     (net.xmp::xmp-destination-content-type conn))
+     (format t "~&        user agent: ~A~%" (net.xmp::xmp-destination-agent conn))
+     (format t "~& SOAPAction header: ~A~%" data)
+     (format t "~&       Host header: ~A~%" (net.xmp::xmp-destination-host conn))
+     (format t "~&   external format: ~S~%" (net.xmp::xmp-external-format conn))
+     (format t "~&additional headers: ~S~%" (xmp-more-headers conn))
+     (format t "~&   additional args: ~S~%" (xmp-client-start conn))
+     (format t "~&      SOAP message:~%~A~%" (soap-xml-leader conn))
+     (soap-print-xml (xmp-message-string conn)))
+    (:after
+     (format t "~& SOAP reply:~%")
+     (soap-print-xml data))))
+
+(defun xmp-peek-at-reply (reply)
+  ;; Before parsing check if it looks like XML and SOAP Envelope
+  ;;  do not require xmldecl  [bug17614]
+  (multiple-value-bind (r se)
+      (match-re "^ *<[?]xml [^>]*[?]>\\s*<" reply :case-fold t :return :index)
+    (setf se (if r (1- (cdr se)) 0))
+    (match-re "^\\s*<[^<>: ]*:?Envelope " reply :case-fold t :return nil :start se)))
+
 (defmethod xmp-call-method ((conn soap-client-connector)
 			    method &rest args)
   (multiple-value-bind (name def)
@@ -1221,23 +1251,9 @@
     (xmp-decode-message 
      conn
      (let* ((action (xmp-getf-in-def conn def :action))
-	    reply parsed xml)
+	    reply parsed)
        (when (soap-debug-p conn)
-	 (format t "~&Calling SOAP method:~%")
-	 (format t "~&   destination URL: ~A~%" (xmp-destination-url conn))
-	 (format t "~&       HTTP method: ~A~%" (net.xmp::xmp-destination-method conn))
-	 (format t "~&     HTTP protocol: ~A~%"
-		 (net.xmp::xmp-destination-http-protocol conn))
-	 (format t "~&      content-type: ~A~%"
-		 (net.xmp::xmp-destination-content-type conn))
-	 (format t "~&        user agent: ~A~%" (net.xmp::xmp-destination-agent conn))
-	 (format t "~& SOAPAction header: ~A~%" action)
-	 (format t "~&       Host header: ~A~%" (net.xmp::xmp-destination-host conn))
-	 (format t "~&   external format: ~S~%" (net.xmp::xmp-external-format conn))
-	 (format t "~&additional headers: ~S~%" (xmp-more-headers conn))
-	 (format t "~&   additional args: ~S~%" (xmp-client-start conn))
-	 (format t "~&      SOAP message:~%~A~%" (soap-xml-leader conn))
-	 (soap-print-xml (xmp-message-string conn)))
+	 (xmp-call-method-debug conn :before action))
 	    
        (case (soap-debug-p conn)
 	 (:stop
@@ -1248,17 +1264,22 @@
 		       conn
 		       :headers 
 		       (when action
+			 ;; The soapAction value stored in Lisp defs must be an undecorated
+			 ;; string to allow various equal tests to pass but the actual
+			 ;; HTTP header value needs the quotes inserted in the header
+			 ;; that goes out on the wire.   [rfe8861]
+			 (setf action (format nil "~A" action))
+			 (when (or (equal "" action) ;; this one needs quotes
+				   ;; this one does not (caller must be using early patch)
+				   (not (eql #\" (elt action 0))) 
+				   )
+			   (setf action (format nil "\"~A\"" action)))
 			 `((,(xmp-symbol "SOAPAction" :keyword) . ,action)))
 		       ))
-	  ;; Before parsing check if it looks like XML.
-	  (setf xml (and (< 20 (length reply))
-			 (let ((nb (position #\space reply :test-not #'eql)))
-			   (string-equal "<?xml " reply :start2 nb :end2 (+ nb 6)))))
 	  (when (soap-debug-p conn)
-	    (format t "~& SOAP reply:~%")
-	    (soap-print-xml reply))
-	  
-	  (if xml
+	    (xmp-call-method-debug conn :after reply))
+
+	  (if (xmp-peek-at-reply reply)
 	      (setf parsed (xmp-parse-message
 			    conn reply
 			    :namespaces 
@@ -1273,9 +1294,8 @@
 				     :all))
 			    ))
 	    (soap-client-error conn :sub-code :reply
-			       :string "Reply is not XML." :detail reply)
+			       :string "Reply is not a SOAP XML document." :detail reply)
 	    )))
-       
        
        parsed))))
 
@@ -2309,8 +2329,10 @@
 			    (setf (net.xmp::xmp-message-string server)
 			      wsdl)
 			    
-		       else (setf (net.xmp::xmp-destination-content-type server) "text/html")
-			    (setf (net.xmp::xmp-message-string server) "<html><body>No wsdl specified</body></html>"))
+		       else (setf (net.xmp::xmp-destination-content-type server)
+				  "text/html")
+			    (setf (net.xmp::xmp-message-string server)
+				  "<html><body>No wsdl specified</body></html>"))
 		    (return-from xmp-server-implementation nil)))
 	  
 	  (setf (net.xmp::xmp-destination-content-type server) "text/html")

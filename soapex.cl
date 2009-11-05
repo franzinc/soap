@@ -24,6 +24,9 @@
 ;;; NOTE: These examples attempt to communicate with servers that existed at one
 ;;; time and may still exist, but the servers are not controlled by Franz Inc. and
 ;;; therefore their existence and behavior is subject to change.
+;;; 
+;;; Some examples are commented out because the servers are no longer available,
+;;; but the code is left in the file to serve as examples anyway.
 
 (in-package :user)
 
@@ -39,9 +42,10 @@
 
 (defvar *last-soap-conn* nil)
 
-;; This service does not seem to ever work
+#+ignore
 (defun sp01 (&key (debug *soap-client-debug*) (timeout 30))
 
+  ;; This service does not seem to ever work
   ;; Sometimes fails: "getCurrentTime" not defined (may be server problem).
 
   (let* ((conn (soap-message-client 
@@ -56,10 +60,15 @@
 				 :action "/currentTime"
 				 ))))))
 
+
+#+ignore
 (defpackage :temp (:use) (:export "getTemp"))
+#+ignore
 (define-namespace :temp "temp" "urn:xmethods-Temperature")
+#+ignore
 (defun sp10 (&key (zip "98325") (debug *soap-client-debug*) (timeout 30))
 
+  ;; NOT AVAILABLE
   ;; http://www.xmethods.net/sd/2001/TemperatureService.wsdl
 
   (let ((conn (soap-message-client 
@@ -79,17 +88,19 @@
 
 
 
-
 ;; This service does not seem to be there any more
 ;; http://webservices.empowered.com/statsws/stats.asmx
 ;; http://www.xignite.com/xstatistics.asmx?WSDL
 
+#+ignore
 (defpackage :baseball (:use) (:export
 			      "GetTeams"
 			      "GetPlayers"
 			      ))
+#+ignore
 (define-namespace :baseball nil "http://webservices.empowered.com/StatsWS/DataService")
 
+#+ignore
 (defun sp21 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8))
 		  (timeout 30))
 
@@ -111,6 +122,7 @@
 	      :namespaces (:baseball)
 	      ))))))
 
+#+ignore
 (defun sp22 (&key (debug *soap-client-debug*) (encoding (list :utf8-base :utf-8))
 		  (timeout 30))
 
@@ -138,10 +150,13 @@
 
 ;; http://www.xmethods.net/sd/2001/CurrencyExchangeService.wsdl     
 
+#+ignore
 (defpackage :temp (:use) (:export "getRate" "Result" "getRateResponse"))
+#+ignore
 (define-soap-element nil
   'temp:|getRateResponse|
   '(:complex (:seq (:element "Result" xsd:|float|))))
+#+ignore
 (defun sp30 (&key (debug *soap-client-debug*) (country1 "Canada") (country2 "USA")
 		  (timeout 30))
   (let ((conn (soap-message-client 
@@ -186,6 +201,18 @@
 				(nil (:temp "tns" "http://arcweb.esri.com/v2"))
 				))
       ))))
+(defun sp40gen (&key (uri "http://arcweb.esri.com/services/v2/RouteFinder.wsdl"))
+  (let* ((wdef (decode-wsdl-at-uri uri)))
+    (make-client-interface wdef 0 "sp40def.cl" :suffix :compose)
+    (makunbound '*client-service-url*) ;; avoid interference from previous tests
+    (load (compile-file "sp40def.cl"))
+    (let* ((r (multiple-value-list (funcall 'client-get-version)))
+	   (result (first r))
+	   (conn (first (last r))))
+      (soap-result-only conn result :error "getVersionResponse" "Result"))
+    ))
+
+	 
 
 
 
@@ -193,12 +220,14 @@
 ;; This service does not seem to be there any more.
 ;; http://icuisine.net/webservices/RecipeService.asmx
 
+#+ignore
 (defpackage :temp (:use) (:export "SearchRecipes" "SearchRecipesResponse"
 				  "SearchRecipesResult"
 				  "TotalCount" "PageSice" "Recipes" "item"
 				  "Name" "ID" "Servings" "Ingredients"
 				  "GetRecipe"
 				  ))
+#+ignore
 (define-soap-element nil
   'temp:|SearchRecipesResponse|
   '(:complex
@@ -218,7 +247,9 @@
 					   (:element "Servings" xsd:|int|)
 					   "Ingredients"
 					   ))))))))))))
+#+ignore
 (define-soap-element nil "Ingredients" '(:complex (:seq* (:any))))
+#+ignore
 (defun sp51 (&key (debug *soap-client-debug*) (criteria "fried eggplant") (pg 0)
 		  (timeout 30))
   (let ((conn (soap-message-client 
@@ -246,6 +277,7 @@
       :|criteria| criteria :|pageNumber| pg :|serviceID| 0 :|email| "foo"
       ))))
 
+#+ignore
 (defun sp52 (&key (debug *soap-client-debug*) id (timeout 30))
   (let ((conn (soap-message-client 
 	       :lisp-package :keyword :soap-debug debug
@@ -274,8 +306,9 @@
 
 
 
-;;; Google API
+;;; Google API -- DISCONTINUED
 
+#+ignore
 (defvar *google-key*)
 ;; The file googlekey.cl is assumed to contain the forms:
 ;;     (in-package :user)
@@ -283,8 +316,10 @@
 ;; The Google user key is obtained from http://www.google.com/apis/index.html
 ;;     after a simple registration process.
 
+#+ignore
 (when (probe-file "googlekey.cl") (load "googlekey.cl"))
 
+#+ignore
 (defpackage :gg
   (:use)
   (:export "doGoogleSearch"
@@ -298,6 +333,7 @@
 	   "GoogleSearchResult"
 	   ))
 
+#+ignore
 (define-soap-element nil 'gg:|doGoogleSearch|
   '(:complex
     (:seq1
@@ -315,6 +351,7 @@
     :action "urn:GoogleSearchAction"
     :namespaces (nil (:gg "gg" "urn:GoogleSearch"))
     ))
+#+ignore
 (define-soap-element nil 'gg:|doSpellingSuggestion|
   '(:complex
     (:seq1
@@ -324,6 +361,7 @@
     :action "urn:GoogleSearchAction"
     :namespaces (nil (:gg "gg" "urn:GoogleSearch"))
     ))
+#+ignore
 (define-soap-element nil 'gg:|doGetCachedPage|
   '(:complex
     (:seq1
@@ -333,12 +371,17 @@
     :action "urn:GoogleSearchAction"
     :namespaces (nil (:gg "gg" "urn:GoogleSearch"))
     ))
+#+ignore
 (define-soap-element nil 'gg:|doGoogleSearchResponse|
   '(:complex (:seq (:element "return" gg:|GoogleSearchResult|))))
+#+ignore
 (define-soap-type nil 'gg:|GoogleSearchResult| '(:complex (:seq* (:any))))
+#+ignore
 (define-soap-type nil 'gg:|ResultElement| '(:complex (:seq* (:any))))
+#+ignore
 (define-soap-type nil 'gg:|DirectoryCategory| '(:complex (:seq* (:any))))
 
+#+ignore
 (defun gs (&key (debug *soap-client-debug*) (q "AllegroCL") (decode nil))
   (let ((conn (soap-message-client 
 	       :url "http://api.google.com/search/beta2"
@@ -358,6 +401,7 @@
 		      )))
 
 
+#+ignore
 (defun gsp (&key (debug *soap-client-debug*) (phrase "common lisp s-expresion")
 		 (decode nil))
   
@@ -376,6 +420,7 @@
 		      )))
 
 
+#+ignore
 (defun gcp (&key (debug *soap-client-debug*) (url "http://www.franz.com") (decode nil))
 
   ;; This example will cause a warning message since the result element
