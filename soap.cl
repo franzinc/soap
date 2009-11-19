@@ -22,20 +22,22 @@
 ;; Loader that picks the correct fasl for the current case-mode.
 
 #+(version= 8 1)
-(sys:defpatch "soap" 2 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
-  "v2: encode and decode float values correctly;
+(sys:defpatch "soap" 3 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+  "v3: xmldecl optional, quote soapaction, no accessors for trivial types;
+v2: encode and decode float values correctly;
 v1: soap server returns wsdl if requested."
   :type :system
   :post-loadable t)
 
 #+(version= 8 0)
-(sys:defpatch "soap" 4 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
+(sys:defpatch "soap" 5 ;;; ALSO CHANGE: incf the # in build.cl & Makefile
   "v1: improved handling of nillable and anyType
 v2: <include> handling and many other extensions;
 v3: generate check-type with quoted typespec, message has one header element
     with one or more parts, WSDL simpleContent with extension generates
     garbled def
-v4: encode and decode float values correctly."
+v4: encode and decode float values correctly;
+v5:xmldecl optional, quote soapaction, no accessors for trivial types."
   :type :system
   :post-loadable t)
 
