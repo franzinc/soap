@@ -4,6 +4,10 @@ don't forget to change the version in code/xversion.cl if you do anything
 user visible.
 *******************************************************************************
 
+2009-11-20    <mm@franz.com>
+
+	* RELNOTES: add 8.2 notes
+
 2009-11-18  mm  <mm@franz.com>
 
 	* soap.cl: bump patch level to 3
