@@ -4,6 +4,10 @@ don't forget to change the version in code/xversion.cl if you do anything
 user visible.
 *******************************************************************************
 
+2009-12-08  Kevin Layer  <layer@gemini.franz.com>
+
+	* Makefile: combine the soap.00? rules
+
 2009-11-20    <mm@franz.com>
 
 	* RELNOTES: add 8.2 notes

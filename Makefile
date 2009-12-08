@@ -37,26 +37,11 @@ DIST: FORCE
 	cp -p soapval1.cl DIST/examples/soap
 	cp -p bignum-server.cl DIST/examples/soap
 
-# Latest 7.0 patch:
-soap.006: clean compile
+soap.001 soap.002 soap.003 soap.004 soap.005 soap.006: clean compile
 	rm -fr DIST DIST.src
 	mkdir DIST \
 	      DIST/code
-	cp -p soap.fasl DIST/code/soap.006
-
-# Latest 8.0 patch:
-soap.004: clean compile
-	rm -fr DIST DIST.src
-	mkdir DIST \
-	      DIST/code
-	cp -p soap.fasl DIST/code/soap.004
-
-# Latest 8.1 patch:
-soap.002: clean compile
-	rm -fr DIST DIST.src
-	mkdir DIST \
-	      DIST/code
-	cp -p soap.fasl DIST/code/soap.002
+	cp -p soap.fasl DIST/code/$@
 
 clean: FORCE
 	rm -fr *.fasl *.out DIST DIST.src soap[am].cl
