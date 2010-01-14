@@ -1,14 +1,5 @@
 Release notes entries for the next release.     -*- mode: text -*-
 
-2009-11-20
-
-   SOAPAction header is now conformant - earlier version failed 
-    to place string quotes around the value.
-   XMLDecl is now (correctly) optional - earlier versions 
-    signalled an error if this item was absent in the SOAP 
-    message.
-   Many SOAP examples were pointing to obsolete web services.
-    These examples are now deleted or commented out.
-  
-
 4/3/07: contents moved to RELNOTES.81 and rfe6975
+
+1/14/10: contents moved to RELNOTES.82 and rfe9243

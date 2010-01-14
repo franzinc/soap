@@ -1,0 +1,11 @@
+2009-11-20
+
+   SOAPAction header is now conformant - earlier version failed 
+    to place string quotes around the value.
+   XMLDecl is now (correctly) optional - earlier versions 
+    signalled an error if this item was absent in the SOAP 
+    message.
+   Many SOAP examples were pointing to obsolete web services.
+    These examples are now deleted or commented out.
+  
+
