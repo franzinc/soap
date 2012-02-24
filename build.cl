@@ -1,6 +1,4 @@
 
-;; $Id: build.cl,v 2.10 2008/10/30 15:49:43 layer Exp $ 
-
 (in-package :user)
 
 #-soap-two-fasls

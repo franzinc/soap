@@ -1,6 +1,4 @@
 
-;; $Id: bignum-server.cl,v 2.2 2005/11/22 00:48:04 mm Exp $ 
-
 (in-package :user)
 
 (eval-when (compile load eval)

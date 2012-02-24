@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp.soap -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2007 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2012 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
