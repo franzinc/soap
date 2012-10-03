@@ -187,6 +187,7 @@ Individual tests:
      (with-timer (ts1002))
      (with-timer (ts1003))
      (with-timer (ts2001))
+     (with-timer (ts2010))
      (with-timer "soap-files-tests" 
 		 (if files
 		     (soap-files-tests :verbose verbose :folder files)
@@ -242,7 +243,7 @@ Individual tests:
 	(r (funcall 'try-server))
 	(v (and (equal (format nil "~A" (apply 'factorial 17 0 nil))
 		(soap-result-only nil (elt r 0) nil "calculateResponse" "calcResult"))
-	 (equal "18"
+	 (equal "17"
 		(soap-result-only nil (elt r 1) nil "encodeNumResponse" "encResult"))
 	 (equal `((:|item| 1) (:|item| 2) (:|item| 3) (:|item| 4) (:|item| 5))
 		(soap-result-only nil (elt r 2) nil "decodeNumResponse" "decResult"))
@@ -1112,7 +1113,8 @@ Individual tests:
       ;;(run-one 21 (sp21) baseball::|GetTeamsResponse|)
       ;;(run-one 22 (sp22) baseball::|GetPlayersResponse|)
       ;;(run-one 30 (sp30) temp::|getRateResponse|)
-      (run-one 40 (sp40) temp::|getVersionResponse|)
+      (let ((*xmp-redef-default* nil))
+	(run-one 40 (sp40) temp::|getVersionResponse|))
       (run-one '40g (sp40gen))
       ;;(run-one 51 (sp51) temp:|SearchRecipesResponse|)
       ;; (run-one 52 (sp52 id))
@@ -1142,6 +1144,10 @@ Individual tests:
 
 
 (defvar *server* nil)
+(defvar *soap-test-verbose* nil)
+
+(defun st-fmt (&rest args) (when *soap-test-verbose* (apply 'format t args)))
+
 (defun test-validator1 (&key index (port 8080)
 			     (host "localhost")
 			     (path *validator1-path*)
@@ -1149,307 +1155,297 @@ Individual tests:
 			     (stop t)
 			     debug log
 			     (verbose nil)
-			     (error-p t)
-			     &aux fail)
-  (let ((oldlog net.aserve::*enable-logging*))
-    (unwind-protect
-	(let ()
-	  (setf net.aserve::*enable-logging* log)
-	  (and *server* stop 
-	       (progn (net.xmp:xmp-stop-server *server*)
-		      (setf *server* nil)))
-	  (or *server*
-	      (setf *server* (make-validator1-server :port port
-						     :debug (ts-debug :server debug))))
-	  (macrolet ((run-one (body)
-			      `(when (or (null index) (eql index this))
-				 (dotimes (n reps)
-				   (if error-p
-				       ,body
-				     (multiple-value-bind (v e)
-					 (ignore-errors (multiple-value-list ,body))
-				       (if e
-					   (let ()
-					     (push this fail)
-					     (values nil e))
-					 v)))))))
+			     &aux fail
+			     (*soap-test-verbose* verbose)
+			     (oldlog net.aserve::*enable-logging*))
+  (unwind-protect
+      (let ()
+	(setf net.aserve::*enable-logging* log)
+	(and *server* stop 
+	     (progn (net.xmp:xmp-stop-server *server*)
+		    (setf *server* nil)))
+	(or *server*
+	    (setf *server* (make-validator1-server :port port
+						   :debug (ts-debug :server debug))))
+	(macrolet ((run-one (body)
+			    `(when (or (null index) (eql index this))
+			       (dotimes (n reps)
+				 (multiple-value-bind (v e)
+				     (ignore-errors (values ,body))
+				   (cond (e (push (cons this e) fail))
+					 (v)
+					 (t (push this fail))))))))
 
-	    (let ((client (soap-message-client :url (format nil "http://~A:~A~A"
-							    host port path)
-					       :lisp-package :keyword
-					       :decode-flag
-					       nil ;;; ignore undefined elts and types
-					       :soap-debug (ts-debug :client debug)
-					       ))
-		  (this 0))
-
-	      (flet ((fmt (&rest args) (when verbose (apply 'format t args))))
-		(flet ((run1
-			(n)
-			(declare (ignore n))
-			;; countTheEntities
-			(let* ((lb (random 10))
-			       (rb (random 10))
-			       (am (random 10))
-			       (ap (random 10))
-			       (qt (random 10))
-			       (sp (+ lb rb am ap qt))
-			       (ch (+ 10 (* sp (+ 2 (random 5)))))
-			       (all (+ sp ch))
-			       (sch `( 
-				      ,@(if (zerop lb) nil (list (list #\< lb)))
-				      ,@(if (zerop rb) nil (list (list #\> rb)))
-				      ,@(if (zerop am) nil (list (list #\& am)))
-				      ,@(if (zerop ap) nil (list (list #\' ap)))
-				      ,@(if (zerop qt) nil (list (list #\" qt)))
-				      ))
-			       (data (let ((data (make-string all)))
-				       (dotimes (i all data)
-					 (setf
-					  (elt data i)
-					  (if sch
-					      (if (< (random (+ sp ch)) sp)
-						  (let* ((j (random (length sch)))
-							 (item (elt sch j))
-							 (char (first item))
-							 (count (second item)))
-						    (decf (second item)) (decf sp)
-						    (when (eql count 1)
-						      (setf sch (remove item sch)))
-						    char)
-						(let ()
-						  (decf ch)
-						  (elt "abcdefghijklmnopqrstuvw"
-						       (random 23))))
-					    (elt "abcdefghijklmnopqrstuvw" 
-						 (random 23)))))))
-			       (rep (call-soap-method
-				     client "countTheEntities" :|s| data))
-			       (res (soap-sub-element-content (cdr rep) :|struct1|))
-			       )
-			  (if (and (eql lb (soap-sub-element-content
-					    res :|ctLeftAngleBrackets|))
-				   (eql rb (soap-sub-element-content
-					    res :|ctRightAngleBrackets|))
-				   (eql am (soap-sub-element-content
-					    res :|ctAmpersands|))
-				   (eql ap (soap-sub-element-content
-					    res :|ctApostrophes|))
-				   (eql qt (soap-sub-element-content res :|ctQuotes|)))
-			      (fmt "~&;;~2D. ok all=~S~%" this all)
-			    (error "run1: bad result ~S ~S" data rep))
-			  ))
-		       (run2
-			(n)
-			(declare (ignore n))
-			;; easyStructTest
-			(let* ((m (random 100))
-			       (l (random 100))
-			       (c (random 100))
-			       (rep (call-soap-method
-				     client "easyStructTest"
-				     :|stooges|
-				     (list :|moe| m :|larry| l :|curly| c)))
-			       (num (soap-sub-element-content (cdr rep) :|number|)))
-			  (if (eql num (+ m l c))
-			      (fmt "~&;;~2D. ok num=~S~%" this num)
-			    (error "run2: bad result ~S ~S"
-				   (list :|moe| m :|larry| l :|curly| c) rep))))
-		       (run3
-			(n)
-			;; echoStructTest
-			(let* ((out
-				(let (new)
-				  (dotimes (j (+ 2 (random 5)))
-				    (setf new
-					  (append
-					   new
-					   (list
-					    (intern
-					     (format nil "substruct~A" j) :keyword)
-					    (list :|moe|   (format nil "~A" (random 10))
-						  :|larry| (format nil "~A" (random 10))
-						  :|curly| (format nil "~A" (random 10))
-						  )))))
-				  new))
-			       (rep (call-soap-method
-				     client "echoStructTest" :|myStruct1| out))
-			       (res (soap-sub-element-content (cdr rep) :|myStruct1|))
-			       )
-			  (if (equal out (soap-alist-to-plist res t))
-			      (fmt "~&;;~2D. ok n=~S~%" this n)
-			    (error "run3: bad result ~S ~S" out rep))))
-		       (run4
-			(n)
-			(let* ((num (random 100))
-			       (bool (eql 1 (random 2)))
-			       (st (random-string 5 15))
-			       (db (random 10.1d0))
-			       (dt (format nil "~A" (random 100000)))
-			       (bin (random-string 50 100))
-			       (out (list num bool st db dt bin))
-			       (rep (call-soap-method client "manyTypesTest"
-						      :|num| num
-						      :|bool| bool
-						      :|state| st
-						      :|doub| db
-						      :|dat| dt
-						      :|bin| bin))
-			       (res (soap-sub-element-content (cdr rep) :|Result1|))
-			       )
-			  (if (and (arrayp res) 
-				   (equal '(6) (array-dimensions res))
-				   (equal out (concatenate 'list res)))
-			      (fmt "~&;;~2D. ok n=~S~%" this n)
-			    (error "run4: bad result ~S ~S" out res)))
-			)
-		       (run5
-			(n)
-			;; moderateSizeArrayCheck
-			(let* (out rep res)
-			  (dotimes (i (+ 5 (random 100)))
-			    (push (random-string 1 10) out))
-			  (setf rep (call-soap-method client "moderateSizeArrayCheck"
-						      :|myArray| out))
-			  (setf res (soap-sub-element-content (cdr rep) :|result2|))
-			  (if (equal res (concatenate 'string (first out) (first (last out))))
-			      (fmt "~&;;~2D. ok n=~S alen=~S~%" this n (length out))
-			    (error "run5: bad result ~S ~S" out res))))
-		       (run6
-			(n)
-			;; nestedStructTest
-			(flet ((random-days 
-				(from to)
-				(let* (new (days (random (1+ (- to from)))))
-				  (dotimes (i days (reverse new))
-				    (push (read-from-string (format nil ":day~2,'0D"
-								    (+ from i)))
-					  new)
-				    (push (list :|moe| 0 :|larry| 0 :|curly| 0) new)))))
-			  (flet ((random-months
-				  (from to)
-				  (let* (new (mos (random (1+ (- to from)))))
-				    (dotimes (i mos (reverse new))
-				      (push (read-from-string (format nil ":month~2,'0D"
-								      (+ from i)))
-					    new)
-				      (push (random-days 1 30)  new)))))
-			    (let* ((m (random 100))
-				   (l (random 100))
-				   (c (random 100))
-				   (out `(:|year2000|
-					   ( ,@(random-months 1 3)
-					       |month04|
-					       (:|day01|
-						 (:|moe| ,m :|larry| ,l :|curly| ,c))
-					       ,@(random-days 2 30)
-					       ,@(random-months 5 12)
-					       )))
-				   (rep (call-soap-method client "nestedStructTest"
-							  :|myStruct2| out))
-				   (res (soap-sub-element-content (cdr rep) :|result3|))
-				   )
-			      (if (eql res (+ m l c))
-				  (fmt "~&;;~2D. ok n=~S mlc=~S~%" this n (list m l c))
-				(error "run6: bad result ~S ~S" out rep)))
-			    )))
-		       (run7
-			(n)
-			(let* ((num (random 1000))
-			       (rep (call-soap-method client "simpleStructReturnTest"
-						      :|myNumber| num)))
-			  (if (equal rep
-				     (list  :|simpleStructReturnTestResult|
-					    (list :|struct2|
-						  (list :|times10| (* num 10))
-						  (list :|times100| (* num 100))
-						  (list :|times1000| (* num 1000))
-						  )))
-			      (fmt "~&;;~2D. ok n=~S mnum=~S~%" this n num)
-			    (error "run7: bad result ~S ~S" num rep))))
-		       (run8
-			(n &aux (rep (call-soap-method client "whichToolkit")))
-			(if (equal rep
-				   '(:|whichToolkitResult|
-				      (:|struct3|
-					(:|toolkitDocsUrl| "http://franz.com")
-					(:|toolkitName| "Allegro Common Lisp SOAP")
-					(:|toolkitVersion| "6.2")
-					(:|toolkitOperatingSystem| "Windows and Unix"))))
-			    (fmt "~&;;~2D. ok n=~S~%" this n)
-			  (error "run8: bad result ~S" rep)))
-
-		       (run9
-			(n)
-			(let* ((num (random 100))
-			       (bool (eql 1 (random 2)))
-			       (st (random-string 5 15))
-			       (db (random 10.1d0))
-			       (dt (format nil "~A" (random 100000)))
-			       (bin (random-string 50 100))
-			       (out (list num bool st db dt bin
-					  'xsd:|token|))
-			       (rep (call-soap-method client "manyTypesTest2"
-						      :|num1| num
-						      :|bool| bool
-						      :|state| st
-						      :|doub| db
-						      :|dat| dt
-						      :|bin| bin
-						      :|qname| 'xsd:|token|
-						      ))
-			       (res (soap-sub-element-content (cdr rep) :|Result1|))
-			       )
-			  (if (and (arrayp res) 
-				   (equal '(9) (array-dimensions res))
-				   (equal out (subseq (concatenate 'list res) 0 7)))
-			      (fmt "~&;;~2D. ok n=~S~%" this n)
-			    (error "run9: bad result ~S ~S" out res))
-			  (setf rep (call-soap-method client "manyTypesTest2"
-						      :|num2| num
-						      :|bool| bool
-						      :|state| st
-						      :|doub| db
-						      :|dat| dt
-						      :|bin| bin
-						      :|qname| 'xsd:|token|
-						      ))
-			  (if (and (arrayp res) 
-				   (equal '(9) (array-dimensions res))
-				   (equal out (subseq (concatenate 'list res) 0 7)))
-			      (fmt "~&;;~2D. ok n=~S~%" this n)
-			    (error "run9: bad result ~S ~S" out res))
-			  )
-			)
-		       )
- 
-		  (incf this)
-		  (run-one (run1 n))
-		  (incf this)
-		  (run-one (run2 n))
-		  (incf this)
-		  (run-one (run3 n))
-		  (incf this)
-		  (run-one (run4 n))
-		  (incf this)
-		  (run-one (run5 n))
-		  (incf this)
-		  (run-one (run6 n))
-		  (incf this)
-		  (run-one (run7 n))
-		  (incf this)
-		  (run-one (run8 n))
-		  (incf this)
-		  (run-one (run9 n))
+	  (let ((client (soap-message-client :url (format nil "http://~A:~A~A"
+							  host port path)
+					     :lisp-package :keyword
+					     :decode-flag
+					     nil ;;; ignore undefined elts and types
+					     :soap-debug (ts-debug :client debug)
+					     ))
+		(this 0))
+	    (incf this)
+	    (run-one (stv1-run1 client this n))
+	    (incf this)
+	    (run-one (stv1-run2 client this n))
+	    (incf this)
+	    (run-one (stv1-run3 client this n))
+	    (incf this)
+	    (run-one (stv1-run4 client this n))
+	    (incf this)
+	    (run-one (stv1-run5 client this n))
+	    (incf this)
+	    (run-one (stv1-run6 client this n))
+	    (incf this)
+	    (run-one (stv1-run7 client this n))
+	    (incf this)
+	    (run-one (stv1-run8 client this n))
+	    (incf this)
+	    (run-one (stv1-run9 client this n))
 		
-		  (when stop (net.xmp:xmp-stop-server *server*))
+	    (when stop (net.xmp:xmp-stop-server *server*))
 
-		  (if fail
-		      (values nil fail)
-		    :all-ok))))))
-      (setf net.aserve::*enable-logging* oldlog))))
+	    (if fail
+		(values nil fail)
+	      :all-ok))))
+    (setf net.aserve::*enable-logging* oldlog)))
       
 
+(defun stv1-run1 (client this n)
+  (declare (ignore this n))
+  ;; countTheEntities
+  (let* ((lb (random 10))
+	 (rb (random 10))
+	 (am (random 10))
+	 (ap (random 10))
+	 (qt (random 10))
+	 (sp (+ lb rb am ap qt))
+	 (ch (+ 10 (* sp (+ 2 (random 5)))))
+	 (all (+ sp ch))
+	 (sch `( 
+		,@(if (zerop lb) nil (list (list #\< lb)))
+		,@(if (zerop rb) nil (list (list #\> rb)))
+		,@(if (zerop am) nil (list (list #\& am)))
+		,@(if (zerop ap) nil (list (list #\' ap)))
+		,@(if (zerop qt) nil (list (list #\" qt)))
+		))
+	 (data (let ((data (make-string all)))
+		 (dotimes (i all data)
+		   (setf
+		    (elt data i)
+		    (if sch
+			(if (< (random (+ sp ch)) sp)
+			    (let* ((j (random (length sch)))
+				   (item (elt sch j))
+				   (char (first item))
+				   (count (second item)))
+			      (decf (second item)) (decf sp)
+			      (when (eql count 1)
+				(setf sch (remove item sch)))
+			      char)
+			  (let ()
+			    (decf ch)
+			    (elt "abcdefghijklmnopqrstuvw"
+				 (random 23))))
+		      (elt "abcdefghijklmnopqrstuvw" 
+			   (random 23)))))))
+	 (rep (call-soap-method
+	       client "countTheEntities" :|s| data))
+	 (res (soap-sub-element-content (cdr rep) :|struct1|))
+	 (ok t))
+    (or (test lb (soap-sub-element-content
+		  res :|ctLeftAngleBrackets|))
+	(setq ok nil))
+    (or (test rb (soap-sub-element-content
+		  res :|ctRightAngleBrackets|))
+	(setq ok nil))
+    (or (test am (soap-sub-element-content
+		  res :|ctAmpersands|))
+	(setq ok nil))
+    (or (test ap (soap-sub-element-content
+		  res :|ctApostrophes|))
+	(setq ok nil))
+    (or (test qt (soap-sub-element-content res :|ctQuotes|))
+	(setq ok nil))
+    ok))
+
+(defun stv1-run2 (client this n)
+  (declare (ignore this n))
+  ;; easyStructTest
+  (let* ((m (random 100))
+	 (l (random 100))
+	 (c (random 100))
+	 (rep (call-soap-method
+	       client "easyStructTest"
+	       :|stooges|
+	       (list :|moe| m :|larry| l :|curly| c))))
+    (test (+ m l c) (soap-sub-element-content (cdr rep) :|number|))))
+
+(defun stv1-run3 (client this n)
+  (declare (ignore this n))
+  ;; echoStructTest
+  (let* ((out
+	  (let (new)
+	    (dotimes (j (+ 2 (random 5)))
+	      (setf new
+		    (append
+		     new
+		     (list
+		      (intern
+		       (format nil "substruct~A" j) :keyword)
+		      (list :|moe|   (format nil "~A" (random 10))
+			    :|larry| (format nil "~A" (random 10))
+			    :|curly| (format nil "~A" (random 10))
+			    )))))
+	    new))
+	 (rep (call-soap-method
+	       client "echoStructTest" :|myStruct1| out))
+	 (res (soap-sub-element-content (cdr rep) :|myStruct1|))
+	 )
+    (test out (soap-alist-to-plist res t) :test 'equal)))
+
+(defun stv1-run4 (client this n)
+  (declare (ignore this n))
+  (let* ((num (random 100))
+	 (bool (eql 1 (random 2)))
+	 (st (random-string 5 15))
+	 (db (random 10.1d0))
+	 (dt (format nil "~A" (random 100000)))
+	 (bin (random-string 50 100))
+	 (out (list num bool st db dt bin))
+	 (rep (call-soap-method client "manyTypesTest"
+				:|num| num
+				:|bool| bool
+				:|state| st
+				:|doub| db
+				:|dat| dt
+				:|bin| bin))
+	 (res (soap-sub-element-content (cdr rep) :|Result1|))
+	 (ok t))
+    (or (test t (when (arrayp res) t))
+	(setq ok nil))
+    (or (test '(6) (array-dimensions res) :test 'equal)
+	(setq ok nil))
+    (or (test out (concatenate 'list res) :test 'equal)
+	(setq ok nil))
+    ok))
+
+(defun stv1-run5 (client this n)
+  (declare (ignore this n))
+  ;; moderateSizeArrayCheck
+  (let* (out rep res)
+    (dotimes (i (+ 5 (random 100)))
+      (push (random-string 1 10) out))
+    (setf rep (call-soap-method client "moderateSizeArrayCheck"
+				:|myArray| out))
+    (setf res (soap-sub-element-content (cdr rep) :|result2|))
+    (test (concatenate 'string (first out) (first (last out))) res :test 'equal)))
+
+(defun stv1-run6 (client this n)
+  (declare (ignore this n))
+  ;; nestedStructTest
+  (flet ((random-days 
+	  (from to)
+	  (let* (new (days (random (1+ (- to from)))))
+	    (dotimes (i days (reverse new))
+	      (push (read-from-string (format nil ":day~2,'0D"
+					      (+ from i)))
+		    new)
+	      (push (list :|moe| 0 :|larry| 0 :|curly| 0) new)))))
+    (flet ((random-months
+	    (from to)
+	    (let* (new (mos (random (1+ (- to from)))))
+	      (dotimes (i mos (reverse new))
+		(push (read-from-string (format nil ":month~2,'0D"
+						(+ from i)))
+		      new)
+		(push (random-days 1 30)  new)))))
+      (let* ((m (random 100))
+	     (l (random 100))
+	     (c (random 100))
+	     (out `(:|year2000|
+		     ( ,@(random-months 1 3)
+		       |month04|
+		       (:|day01|
+			 (:|moe| ,m :|larry| ,l :|curly| ,c))
+		       ,@(random-days 2 30)
+		       ,@(random-months 5 12)
+		       )))
+	     (rep (call-soap-method client "nestedStructTest"
+				    :|myStruct2| out))
+	     (res (soap-sub-element-content (cdr rep) :|result3|))
+	     )
+	(test (+ m l c) res))
+      )))
+
+(defun stv1-run7 (client this n)
+  (declare (ignore this n))
+  (let* ((num (random 1000))
+	 (rep (call-soap-method client "simpleStructReturnTest"
+				:|myNumber| num)))
+    (test (list  :|simpleStructReturnTestResult|
+		 (list :|struct2|
+		       (list :|times10| (* num 10))
+		       (list :|times100| (* num 100))
+		       (list :|times1000| (* num 1000))
+		       ))
+	  rep 
+	  :test 'equal)))
+
+(defun stv1-run8 (client this n &aux (rep (call-soap-method client "whichToolkit")))
+  (declare (ignore this n))
+  (test '(:|whichToolkitResult|
+	   (:|struct3|
+	     (:|toolkitDocsUrl| "http://franz.com")
+	     (:|toolkitName| "Allegro Common Lisp SOAP")
+	     (:|toolkitVersion| "x.y")
+	     (:|toolkitOperatingSystem| "Windows and Unix")))
+	rep :test 'equal))
+
+(defun stv1-run9 (client this n)
+  (declare (ignore this n))
+  (let* ((num (random 100))
+	 (bool (eql 1 (random 2)))
+	 (st (random-string 5 15))
+	 (db (random 10.1d0))
+	 (dt (format nil "~A" (random 100000)))
+	 (bin (random-string 50 100))
+	 (out (list num bool st db dt bin
+		    'xsd:|token|))
+	 (rep (call-soap-method client "manyTypesTest2"
+				:|num1| num
+				:|bool| bool
+				:|state| st
+				:|doub| db
+				:|dat| dt
+				:|bin| bin
+				:|qname| 'xsd:|token|
+				))
+	 (res (soap-sub-element-content (cdr rep) :|Result1|))
+	 (ok t))
+    (or (test t (when (arrayp res) t))
+	(setq ok nil))
+    (or (test '(9) (array-dimensions res) :test 'equal)
+	(setq ok nil))
+    (or (test out (subseq (concatenate 'list res) 0 7) :test 'equal)
+	(setq ok nil))
+    (setf rep (call-soap-method client "manyTypesTest2"
+				:|num2| num
+				:|bool| bool
+				:|state| st
+				:|doub| db
+				:|dat| dt
+				:|bin| bin
+				:|qname| 'xsd:|token|
+				))
+    (setq res (soap-sub-element-content (cdr rep) :|Result1|))
+    (or (test t (when (arrayp res) t))
+	(setq ok nil))
+    (or (test '(9) (array-dimensions res) :test 'equal)
+	(setq ok nil))
+    (or (test out (subseq (concatenate 'list res) 0 7) :test 'equal)
+	(setq ok nil))
+    ok))
 
 
 
@@ -2267,6 +2263,7 @@ Individual tests:
 
 		 (:element "float-string"  xsd:|float|)
 		 (:element "dbl-string"  xsd:|double|)
+		 (:element "bool-string"  xsd:|boolean|)
 			  
 		 ))))
 	))
@@ -2299,6 +2296,7 @@ Individual tests:
 
 		 (:element "float-string"  xsd:|string|)
 		 (:element "dbl-string"  xsd:|string|)
+		 (:element "bool-string" xsd:|string|)
 			  
 		 ))))
 	))
@@ -2538,6 +2536,18 @@ Individual tests:
 		  ;;54
 		  (("dbl-string" "77.123e0") ":parts dbl-string 77.123d0 double-float ")
 
+		  ;;55   bug13943
+		  (("float" 0.0) ":parts float 0.0d0 double-float ")
+
+		  ;;56   bug21405
+		  (("dbl" 0.0) ":parts dbl 0.0d0 double-float ")
+
+		  ;;57   bug17461
+		  (("bool-string" "   0   ") ":parts bool-string nil null ")
+
+		  ;;58  bug17461
+		  (("bool-string" "   true   ") ":parts bool-string t symbol ")
+
 		  ;;("dec" 123.45)
 		  ;;("dec" 123/45)
 		
@@ -2555,6 +2565,7 @@ Individual tests:
 	       (setf expected (format nil ":parts ~A ~A ~A " 
 				      (first parts) (second parts) (type-of (second parts))
 				      )))
+	   (setq res :unset)
 	   (or
 	    (case expected
 	      (:call-error
@@ -2570,6 +2581,7 @@ Individual tests:
 	    (setf ok nil))
 	   (or
 	    (eq expected :call-error)
+	    (eq res :unset)
 	    (test expected res :test #'equal
 		  :fail-info (list* key j :default parts))
 	    (setf ok nil))
@@ -2945,7 +2957,100 @@ Individual tests:
   (list "return" body))
 
 
+(defun ts2010 (&aux *xmp-report-error-action*)
+  ;; Test include/import options
+		    
+  (setq *xmp-report-error-action* :ignore)
+  (test-no-error
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='foo.wsdl' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include 'no-such-function
+    ))
 
+  (setq *xmp-report-error-action* :warn)
+  (test-warning
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='foo.wsdl' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include 'no-such-function
+    ))
 
- 
+  (setq *xmp-report-error-action* :error)
+  (test-error
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='foo.wsdl' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include 'no-such-function
+    )
+   :include-subtypes t
+   :announce t)
+  (test-error
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='foo.wsdl' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include 'wsdl-include-file
+    )
+   :include-subtypes t
+   :announce t)
+  (test-error
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='http://localhost:1234' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include 'wsdl-include-url
+    )
+   :include-subtypes t
+   :announce t)
+  (test-error
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='http://localhost:1234' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include '(wsdl-include-url :timeout 0.001)
+    )
+   :include-subtypes t
+   :announce t)
+  (test-error
+   (decode-wsdl-string 
+    "<wsdl:definitions    
+        xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'
+        xmlns:xsd='http://www.w3.org/2001/XMLSchema/'
+        >
+      <xsd:include schemaLocation='http://franz.com/nosuchpage.htm' />
+    </wsdl:definitions>"
+    :namespaces :wsdl1.1
+    :include 'wsdl-include-url
+    )
+   :include-subtypes t
+   :announce t)
 
+  )

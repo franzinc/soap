@@ -263,7 +263,7 @@
 			      ((member 1) nil)
 			      (integer (1- *print-parts*))
 			      (otherwise nil))))
-	 (format s " ~S" p))))
+	 (format s " ~_~S" p))))
    ))
 
 (defclass schema-text-component (schema-component) ())

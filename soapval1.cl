@@ -368,7 +368,7 @@
   (list :|struct3|
 	(list :|toolkitDocsUrl| "http://franz.com"
 	      :|toolkitName|    "Allegro Common Lisp SOAP"
-	      :|toolkitVersion| "6.2"
+	      :|toolkitVersion| "x.y"
 	      :|toolkitOperatingSystem| "Windows and Unix")))
 
 

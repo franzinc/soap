@@ -49,7 +49,13 @@
 
 #+soap-pxml (eval-when (compile load eval) (pxml-version 7 nil nil t))
 
-(defparameter *xmp-version* (list 1 3 1))
+(defparameter *xmp-version*
+  (list 
+   1
+   3
+   ;;1  ;;;  1.3.1 was version released with 9.0 and earlier
+   3  ;;; rfe7514 bug17411 bug17461 bug21405 bug17705 rfe7512
+   ))
 (defun xmp-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
   (typecase v1
     (integer (if (or (< (first *xmp-version*) v1)
@@ -286,6 +292,7 @@
    *xmp-debug*
    *xmp-warning-leader*
    *xmp-compare-uri*
+   *xmp-redef-default*
 
    ))
 
@@ -294,6 +301,7 @@
 
 
 (defvar *xmp-debug* nil)
+(defvar *xmp-redef-default* :warn)
 
 
 ;;; Load-time symbol BEGIN
@@ -591,7 +599,7 @@
 (defmethod print-object ((x xmp-element) s)
   (print-unreadable-object 
    (x s :type t :identity t)
-   (format s "~S name=~S type=~S ~A"
+   (format s "~S ~_name=~S ~_type= ~S ~_~A"
 	   (xmp-lisp-value x)
 	   (xmp-element-name x)
 	   (xmp-element-type x)
@@ -626,9 +634,9 @@
 	  (det (xmp-fault-detail e)))
      (format s "xmp~S" (xmp-fault-code e))
      (when sub (format s ".~A" sub))
-     (when fac (format s " factor=~S" fac))
-     (cond (str (format s " ~A" str))
-	   (det (format s " detail=~S" det)))
+     (when fac (format s " ~_factor=~S" fac))
+     (cond (str (format s " ~_~A" str))
+	   (det (format s " ~_detail=~S" det)))
      )))
 
 
@@ -1289,7 +1297,7 @@
 (defmethod print-object ((x xmp-namespace-declaration) s)
   (print-unreadable-object 
    (x s :identity t)
-   (format s "XND ~A ~A ~A" (when (xnd-package x) (package-name (xnd-package x)))
+   (format s "XND ~A ~A ~_~A" (when (xnd-package x) (package-name (xnd-package x)))
 	   (xnd-prefix x) (xnd-uri x))))
 
 (defmethod xmp-export-namespace ((nm xmp-namespace-declaration))
@@ -3327,7 +3335,7 @@
 
 
 (defmethod define-xmp-type ((conn t) name type-spec &rest options
-			    &key (redef :warn) (nss :dns)
+			    &key (redef *xmp-redef-default*) (nss :dns)
 			    &allow-other-keys
 			    &aux
 			    (dname (xmp-decode-qualified-name conn name nss))
@@ -3362,7 +3370,7 @@
   (if (null type-spec) r dname))
 
 (defmethod define-xmp-element ((conn t) names type-spec &rest options
-			       &key (redef :warn) (nss :dns)
+			       &key (redef *xmp-redef-default*) (nss :dns)
 			       &allow-other-keys &aux r d)
   (if (and (consp names) (not (eq :any-case (car names))))
       (progn (mapcar #'(lambda (name)

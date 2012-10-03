@@ -72,6 +72,8 @@
    #:wsdl-include-file 
    #:wsdl-include-url
    #:wsdl-option
+
+   #:*xmp-report-error-action*
    ))
 
 (eval-when (compile load eval)
@@ -382,7 +384,9 @@
   (cond (uri 
 	 (when (or string stream file) (error "Ambiguous source."))
 	 (multiple-value-bind (body rc h ruri)
-	     (net.aserve.client:do-http-request uri)
+	     (apply 'net.aserve.client:do-http-request
+		    ;; rfe7512 - allow caller to specify additional args
+		    (if (consp uri) uri (list uri)))
 	   (if (and body (eql rc 200))
 	       (setf string body)
 	     (error "URI ~A returned error ~S ~S ~S"
@@ -492,6 +496,20 @@
 			    &key types &allow-other-keys)
   (values data types))
 
+(defvar *xmp-report-error-action* :warn
+  ;; :ignore :warn :error
+  )
+
+(defun xmp-report-error (label thunk)
+  (multiple-value-bind (v e)
+      (ignore-errors (multiple-value-list (funcall thunk)))
+    (if e 
+	(case *xmp-report-error-action*
+	  (:ignore (values nil))
+	  (:warn (warn "Error in ~A: ~S ~A" label e e))
+	  (otherwise (error "Error in ~A: ~S ~A" label e e)))
+      (values-list v))))
+
 (defmethod xmp-begin-element :around ((conn wsdl-file-connector)
 				      (elt (eql (xsd "include")))
 				      &rest options
@@ -501,10 +519,13 @@
 	 (from (xmp-getf conn dattr "schemaLocation"))
 	 (filter (wsdl-option conn :include))
 	 (data (when filter
-		 (ignore-errors
-		   (if (consp filter)
-		       (apply (first filter) conn from (cdr filter))
-		     (funcall filter conn from)))))
+		 (xmp-report-error
+		  (format nil "call to :include action ~S ~A"
+			  filter from)
+		  (lambda ()
+		    (if (consp filter)
+			(apply (first filter) conn from (cdr filter))
+		      (funcall filter conn from))))))
 	 vals done x)
     (when data
       (let* ((schema (make-instance 'wsdl-included-connector
@@ -550,10 +571,13 @@
 	 (from (xmp-getf conn dattr "schemaLocation"))
 	 (filter (wsdl-option conn :import))
 	 (data (when filter
-		 (ignore-errors
-		   (if (consp filter)
-		       (apply (first filter) conn from (cdr filter))
-		     (funcall filter conn from)))))
+		 (xmp-report-error
+		  (format nil "call to :import action ~S ~A"
+			  filter from)
+		  (lambda ()
+		    (if (consp filter)
+			(apply (first filter) conn from (cdr filter))
+		      (funcall filter conn from))))))
 	 vals done x)
     (when data
       (let* ((schema (make-instance 'wsdl-included-connector
@@ -591,13 +615,20 @@
     (values-list vals)))
 
 (defmethod wsdl-include-file ((conn wsdl-file-connector) from)
-  (when (probe-file from)
-    (ignore-errors (file-contents from))))
+  (if (probe-file from)
+      (file-contents from)
+    (error "File not found.")))
 
-(defmethod wsdl-include-url ((conn wsdl-file-connector) from)
-  (mp:with-timeout 
-   (300 nil)
-   (ignore-errors (net.aserve.client:do-http-request :url from))))
+(defmethod wsdl-include-url ((conn wsdl-file-connector) from &rest http-args)
+  ;; If a timeout is desired, caller can add a timeout arg that will be
+  ;;  passed through to do-http-request.
+  (multiple-value-bind (resp rc)
+      (apply 'net.aserve.client:do-http-request
+	     from ;;; bug17705
+	     http-args)
+    (if (eql rc 200)
+	resp
+      (error "Reply to url is ~A ~A" rc resp))))
   
 
 
@@ -1027,7 +1058,7 @@
 	       (wsdl-lookup conn :type name recursive)))))))
 
 (defmethod wsdl-lookup ((conn wsdl-file-connector) kind name recursive)
-  ;; returnd 2 values: v1 v2
+  ;; returnd 3 values: v1 v2 plist
   ;; kind -> :element | :type 
   ;; recursive -> nil | t | :any            v1=type def     v2=defining form
   ;;           -> :complex        
@@ -1807,6 +1838,7 @@
 
 (defmethod wsdl-make-symbol ((conn wsdl-file-connector) pname string package
 			     &key from export nil-if-conflict)
+  ;; Generate symbols used in Lisp code.
   ;; if pname is specified, then intern the string as given
   ;; if string is given, 
   (let* ((all-names (wsdl-all-names conn))
@@ -3577,6 +3609,7 @@
    (t    (wsdl-add-element conn elt def nil) )))
 
 (defmethod wsdl-make-name ((conn wsdl-file-connector) prefix &aux place)
+  ;; Generate strings used as names in WSDL text.
   (with-slots
    (counters name-prefix) conn
    (setf place (assoc prefix counters :test #'string-equal))
