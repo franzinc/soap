@@ -607,13 +607,13 @@
     (xmp-any-cpart conn)))
 
 
-(defmethod define-soap-type ((conn t) &rest options
+(defmethod define-soap-type ((conn t) name type-def &rest options
 			     &aux (*xmp-warning-leader* "SOAP"))
-  (apply 'define-xmp-type conn options))
+  (apply 'define-xmp-type conn name type-def options))
 
-(defmethod define-soap-element ((conn t) &rest options
+(defmethod define-soap-element ((conn t) elt-name-spec type-spec &rest options
 				&aux (*xmp-warning-leader* "SOAP"))
-  (apply 'define-xmp-element conn options))
+  (apply 'define-xmp-element conn elt-name-spec type-spec options))
 
 
 (defvar *soap-server* nil)
@@ -1884,11 +1884,15 @@
 (def-soap-simple-content ((enc "boolean") (xsd "boolean"))
   :class soap-connector
   :decode ((declare (ignore options))
-	   (cond ((equal data "0") nil)
-		 ((equal data "false") nil)
-		 ((equal data "1") t)
-		 ((equal data "true") t)
-		 (t (soap-client-error conn :string "Boolean value is not valid."))))
+	   (let ((content (string-trim 
+			   ;; bug17461 - Must collapse whitespace before decoding.
+			   '(#\space #\tab #\newline #\return #\linefeed)
+			   data)))
+	     (cond ((equal content "0") nil)
+		   ((equal content "false") nil)
+		   ((equal content "1") t)
+		   ((equal content "true") t)
+		   (t (soap-client-error conn :string "Boolean value is not valid.")))))
   :encode ((declare (ignore options))
 	   (xmp-encode-content conn (if data "true" "false"))
 	   (xsd "boolean"))
@@ -1963,18 +1967,22 @@
 	   (let ((f (coerce (or data 0) 'double-float)))
 	     (xmp-encode-content
 	      conn
-	      (string-trim
-	       " "
-	       (format nil "~VF" 
-		       (+ 
-			;; This is conservatively the most significant digits
-			;; in a double-float number, plus room for a leading or
-			;; trailing zero.
-			22
-			;; This is conservatively the most leading or trailing
-			;; zeroes that will be printed.
-			(abs (truncate (log (abs f) 10))))
-		       f)))
+	      (if (or (eql f 0e1) (eql f 0d1))
+		  ;; A true float zero causes an error in the 
+		  ;; format used below.   [bug21405]
+		  (concatenate 'string "0.0")  
+		(string-trim
+		 " "
+		 (format nil "~VF" 
+			 (+ 
+			  ;; This is conservatively the most significant digits
+			  ;; in a double-float number, plus room for a leading or
+			  ;; trailing zero.
+			  22
+			  ;; This is conservatively the most leading or trailing
+			  ;; zeroes that will be printed.
+			  (abs (truncate (log (abs f) 10))))
+			 f))))
 	     (xsd "double")))
   :check-type number
   )

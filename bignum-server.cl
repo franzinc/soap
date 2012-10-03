@@ -194,7 +194,7 @@
       (call-soap-method
        client 'bn::|calculate| "opname" "factorial" "num1" "17" "num2" "0")
       (call-soap-method
-       client 'bn::|encodeNum| "bigits" (list "item" 1 "item" 2 "item" 3) "base" 3)
+       client 'bn::|encodeNum| "bigits" (list "item" 1 "item" 2 "item" 2) "base" 3)
       (call-soap-method
        client 'bn::|decodeNum| "num" "12345" "base" 10))
      client)))
