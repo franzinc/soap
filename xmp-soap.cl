@@ -29,56 +29,12 @@
 (eval-when (compile eval)
   (defmacro soap-case-mode () *current-case-mode*))
 
-(defparameter *soap-version* '(2 31 0))
 (defvar *soap-server-debug* nil)
 (defvar *soap-client-debug* nil)
 
-(defun soap-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
-  (typecase v1
-    (integer (if (or (< (first *soap-version*) v1)
-		     (and v2
-			  (or 
-			   (and (= (first *soap-version*) v1)
-				(< (second *soap-version*) v2))
-			   (and v3
-				(= (second *soap-version*) v2)
-				(< (third *soap-version*) v3)))))
-		 (if error-p
-		     (error
-		      "SOAP Module Version ~A.~A.~A needed, but loaded version is ~{~A.~}"
-		      v1 (or v2 0) (or v3 0) *soap-version*)
-		   nil)
-	       *soap-version*))
-    (otherwise (format v1-or-s "SOAP Module Version ~{~A.~}" *soap-version*))))
+(defun soap-version (&rest args)
+  (apply 'xmp-version args))
     
-#+ignore
-(eval-when (compile load eval)
-  (defparameter *soap-case-mode* (soap-case-mode))
-  (or (eq *soap-case-mode* *current-case-mode*)
-      (error "Expected *current-case-mode*=~S" *soap-case-mode*))
-
-  #+ignore
-  (or (position :soapaction net.aserve::*header-keyword-array*
-		:test #'string-equal)
-      (cerror
-       "Continue, ignoring SOAPAction headers."
-       "This version of AllegroServe does not recognize HTTP SOAPAction headers."))
-
-  (or (multiple-value-bind (v0 v1 v2)
-	  (values-list net.aserve:*aserve-version*)
-	(or (< 1 v0)
-	    (and (eql 1 v0)
-		 (or (< 2 v1)
-		     (and (eql 2 v1)
-			  (< 29 v2))))))
-      (cerror
-       "Continue, ignoring SOAPAction headers."
-       "This version of AllegroServe does not recognize HTTP SOAPAction headers."))
-	
-
-  )
-
-
 
 (defpackage :net.xmp.soap
   
@@ -424,24 +380,6 @@
 (defclass soap-element (xmp-element) ())
 (defclass soap-header  (soap-element) ())
 (defclass soap-fragment (xmp-element) ())
-
-
-#+ignore
-(defmethod xmp-copy ((object soap-connector)
-		     &key &allow-other-keys
-		     &aux (new (call-next-method)))
-  (setf (soap-encoding-style new) (soap-encoding-style object)
-	(soap-actor new) (soap-actor object)
-	(soap-headers new) (soap-headers object)
-	(soap-must-understand-flag new) (soap-must-understand-flag object)
-	(soap-decode-flag new) (soap-decode-flag object)
-	(soap-debug new) (soap-debug object)
-	(soap-body-form new) (soap-body-form object)
-	)
-  new)
-
-
-
 
 
 
@@ -992,6 +930,10 @@
 			   ;; and "num" is defined as (:or "num1" "num2")
 			   ;; then we should look for "num1" or "num2" in the
 			   ;; argument list - not "num"
+			   ;; bug20672 was looking for (:complex (:or ...))
+			   ;;   BUT (:element foo (:complex (:or ...))) denotes a nested element structure
+			   ;;   WHILE (:element foo (:or ...)) denotes alternate element names???
+			   ;;   BUT BUT (:element foo (:or ...)) is not well formed!
 				
 			   (let* ((edef defs)
 				  (type (if (consp edef)
@@ -1005,9 +947,7 @@
 						edef))
 					   :out)))
 				  ctail)
-			     (if (and (consp type)
-				      (eq :complex (first type))
-				      (consp (setf ctail (second type)))
+			     (if (and (consp (setf ctail type))
 				      (eq :or (pop ctail))
 				      (or (atom (first ctail))
 					  (eq :element (first (first ctail))))
@@ -1199,8 +1139,6 @@
 
 
 (defun soap-print-xml (xml)
-
-  #-soap-pxml 
   (multiple-value-bind (v e)
       (ignore-errors
 	(progn (net.xml.dom:dom-print
@@ -1208,9 +1146,6 @@
 	       (format t " ~% ~%")
 	       t))
     (if v t (format t "~&DOM error: ~A~%Raw string:~%~A ~% ~%" e xml)))
-
-  #+soap-pxml (format t "~&~A ~% ~%" xml)
-
   )
 
 (defun xmp-call-method-debug (conn where data)
@@ -2895,3 +2830,4 @@
   
   )
 (define-soap-names)
+

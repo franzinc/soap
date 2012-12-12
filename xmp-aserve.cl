@@ -114,25 +114,6 @@
 
   )
 
-#+ignore
-(defmethod xmp-copy :around ((object xmp-aserve-connector) &key &allow-other-keys)
-  (let ((new (call-next-method)))
-    (setf (xmp-destination-host new) (xmp-destination-host object)
-	  (xmp-destination-agent new) (xmp-destination-agent object)
-	  (xmp-destination-content-type new) (xmp-destination-content-type object)
-	  (xmp-destination-http-protocol new) (xmp-destination-http-protocol object)
-	  (xmp-destination-method new) (xmp-destination-method object)
-	  (xmp-destination-url new) (xmp-destination-url object)
-	  (xmp-server-parameters new) (xmp-server-parameters object)
-	  )
-    new))
-#+ignore
-(defmethod xmp-copy :around ((object xmp-aserve-server-connector) &key &allow-other-keys)
-  (let ((new (call-next-method)))
-    (setf (xmp-aserve-server new) (xmp-aserve-server object)
-	  )
-    new))
-
 
 
 (defmethod xmp-external-format ((conn xmp-aserve-connector)) 

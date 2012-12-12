@@ -188,8 +188,10 @@ Individual tests:
      (with-timer (ts1003))
      (with-timer (ts2001))
      (with-timer (ts2010))
+     (with-timer (ts2020))
+     (with-timer (ts2030))
      (with-timer "soap-files-tests" 
-		 (if files
+		 (if (and files (probe-file files))
 		     (soap-files-tests :verbose verbose :folder files)
 		   t))
      ;; do this one after soap-files-tests to avoid package pollution
@@ -3054,3 +3056,171 @@ Individual tests:
    :announce t)
 
   )
+
+(defparameter 
+  *ts2020-wsdl*
+  "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>
+<definitions xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"
+             xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\"
+             xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"
+             xmlns:soap=\"http://schemas.xmlsoap.org/wsdl/soap/\"
+             xmlns:psaDataTypes=\"psaDataTypes\"
+             xmlns=\"http://schemas.xmlsoap.org/wsdl/\"
+             xmlns:tns=\"urn:repository\"
+             targetNamespace=\"urn:repository\">
+
+    <types>
+        <xsd:schema targetNamespace=\"urn:repository\"
+                    elementFormDefault=\"qualified\"
+                    attributeFormDefault=\"unqualified\"
+                >
+
+      <xsd:complexType name=\"PSAModelType\">
+        <xsd:annotation>
+            <xsd:documentation>This data type is created based on PSA data schema</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element name=\"id\" type=\"xsd:integer\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>
+            <xsd:element name=\"name\" type=\"xsd:string\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+            <xsd:complexType name=\"resultStatusType\">
+              <xsd:sequence>
+                <xsd:element name=\"code\" type=\"xsd:int\" minOccurs=\"1\" default=\"0\"/>
+                <xsd:element name=\"message\" type=\"xsd:string\" minOccurs=\"1\" default=\"OK\"/>
+              </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:element name=\"InsertPSAModelData\" type=\"tns:PSAModelType\"/>
+            <xsd:element name=\"InsertPSAModelResult\" type=\"tns:resultStatusType\"/>
+
+
+            <xsd:element name=\"SelectPSAModelData\" type=\"xsd:string\"/>
+            <xsd:element name=\"SelectPSAModelResult\" type=\"tns:SelectPSAModelResultType\"/>
+            <xsd:complexType name=\"SelectPSAModelResultType\">
+                <xsd:sequence>
+                    <xsd:element name=\"resultStatus\" type=\"tns:resultStatusType\"/>
+                    <xsd:element name=\"data\" type=\"tns:PSAModelType\"/>
+                </xsd:sequence>
+            </xsd:complexType>
+
+        </xsd:schema>
+    </types>
+
+    <!-- Definition of input and output parameters for the operation -->
+    <message name=\"InsertPSAModelRequest\">
+        <part name=\"PSAModels\" element=\"tns:InsertPSAModelData\"/>
+    </message>
+
+    <message name=\"InsertPSAModelResponse\">
+        <part name=\"InsertPSAModelOut\" element=\"tns:InsertPSAModelResult\"/>
+    </message>
+
+    <message name=\"SelectPSAModelRequest\">
+        <part name=\"PSAModelId\" element=\"tns:SelectPSAModelData\" />
+    </message>
+
+    <message name=\"SelectPSAModelResponse\">
+        <part name=\"SelectPSAModelOut\" element=\"tns:SelectPSAModelResult\" />
+    </message>
+
+    <portType name=\"ContentManager\">
+
+        <operation name=\"InsertPSAModel\">
+            <input message=\"tns:InsertPSAModelRequest\"/>
+            <output message=\"tns:InsertPSAModelResponse\"/>
+        </operation>
+
+        <operation name=\"SelectPSAModel\">
+            <input message=\"tns:SelectPSAModelRequest\"/>
+            <output message=\"tns:SelectPSAModelResponse\"/>
+        </operation>
+
+    </portType>
+
+    <binding name=\"ContentManagerBinding\" type=\"tns:ContentManager\">
+        <soap:binding style=\"document\" transport=\"http://schemas.xmlsoap.org/soap/http\"/>
+
+        <operation name=\"InsertPSAModel\">
+            <input>
+                <soap:body use=\"literal\"/>
+            </input>
+            <output>
+                <soap:body use=\"literal\"/>
+            </output>
+        </operation>
+
+        <operation name=\"SelectPSAModel\">
+            <input>
+                <soap:body use=\"literal\"/>
+            </input>
+            <output>
+                <soap:body use=\"literal\"/>
+            </output>
+        </operation>
+    </binding>
+
+    <service name=\"Repository\">
+        <port name=\"ContentManagerPort\" binding=\"tns:ContentManagerBinding\">
+            <soap:address location=\"http://127.0.0.1:8080/services/Repository\"/>
+        </port>
+    </service>
+
+
+</definitions>
+"
+  )
+
+(defun ts2020 (&key (clean t) &aux def)
+  ;; test for bug21565 fix
+  (soap-new-environment)
+  (define-namespace :repo "repo" "urn:repository")
+  (define-namespace-map :repomap nil '(:repo))
+  (setf def (decode-wsdl-string
+	     *ts2020-wsdl*
+	     ;; "spr39898.wsdl" ;;; "massifrepository2.wsdl" 
+	     :namespaces :repomap :verbose t :import t))
+  (prog1 (test-no-error (make-client-interface def 0 "ts2020.cl"))
+    (when clean (delete-file "ts2020.cl") (delete-file "ts2020.txt"))))
+
+
+(defun ts2030 (&aux 
+	       (cl (soap-message-client :url "dummy"))
+	       (type '(:complex
+		       (:seq
+			(:element "with-choice"
+				  (:complex 
+				   (:or (:element "foo" xsd:|string|)
+					(:element "bar" xsd:|string|)))))))
+	       (type2 '(:complex
+			(:seq
+			 (:or (:element "foo" xsd:|string|)
+			      (:element "bar" xsd:|string|)))))
+	       (type3 '(:complex
+			(:or (:element "foo" xsd:|string|)
+			     (:element "bar" xsd:|string|))))
+	       )
+  ;; Test case for 
+  ;; bug20672/spr38758 SOAP module mishandles xsd:choice constructs
+  (test
+   "<top><with-choice><bar xsi:type=\"xsd:string\">FOOBODY</bar></with-choice></top>"
+   (xmp-element-content
+    (soap-encode-object 
+     cl "top" type (list "with-choice" (list "bar" "FOOBODY"))))
+   :test #'equal)
+  (test
+   "<top><bar xsi:type=\"xsd:string\">FOOBODY</bar></top>"
+   (xmp-element-content
+    (soap-encode-object 
+     cl "top" type2 (list "bar" "FOOBODY")))
+   :test #'equal)
+  (test
+   "<top><bar xsi:type=\"xsd:string\">FOOBODY</bar></top>"
+   (xmp-element-content
+    (soap-encode-object 
+     cl "top" type3 (list "bar" "FOOBODY")))
+   :test #'equal)
+  )
+   
+  

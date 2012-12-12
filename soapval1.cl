@@ -377,17 +377,12 @@
 
 ;;; ADDITIONAL TESTS not called from web validator
 
-(define-soap-element nil "num" 
-  '(:complex (:or (:element "num1" xsd:|int|)
-		  (:element "num2" xsd:|int|))))
-
 (define-soap-element nil "manyTypesTest2"
   '(:complex
     (:seq
      
      ;;(:element "num" xsd:|int|)
-     "num" 
-     #+ignore(:or (:element "num1" xsd:|int|)
+     (:or (:element "num1" xsd:|int|)
 	  (:element "num2" xsd:|int|))
 
      (:element "bool" xsd:|boolean|)

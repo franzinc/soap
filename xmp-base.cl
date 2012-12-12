@@ -27,51 +27,52 @@
 ;; FEATURES
 ;;   :soap-sax   - use native SAX parser API
 ;;   :soap-lxml  - use LXML-on-SAX parser
-;;   :soap-pxml  - use old PXML parser
 
 ;; pick a default if no features present at all
-#-(or soap-sax soap-lxml soap-pxml)
+#-(or soap-sax soap-lxml)
   (eval-when (compile load eval) (push :soap-lxml *features*))
 
-;; make sure only one of the three is present
-#+(or (and soap-sax soap-lxml) (and soap-sax soap-pxml) (and soap-pxml soap-lxml))
+;; make sure only one of the two is present
+#+(or (and soap-sax soap-lxml))
   (eval-when (compile load eval) (error "TOO MANY XML PARSER FEATURES"))
 
 
 
 (eval-when (compile load eval) 
-  #-soap-pxml (require :sax)
-  #+soap-pxml (require :pxml)
-
+  (require :sax)
   (require :aserve)
   )
 
-
-#+soap-pxml (eval-when (compile load eval) (pxml-version 7 nil nil t))
-
 (defparameter *xmp-version*
   (list 
-   1
-   3
-   ;;1  ;;;  1.3.1 was version released with 9.0 and earlier
-   3  ;;; rfe7514 bug17411 bug17461 bug21405 bug17705 rfe7512
+   ;; 1.3.1 was version released with 9.0 and earlier
+   ;; 1.3.3 was patch release, includes SOAP 2.31.0
+   ;;       rfe7514  SOAP print-object methods should be print-pretty friendly
+   ;;       bug17411 soap gf arglist doesn't agree with documentation
+   ;;       bug17461 SOAP decoder whitespace handling re XML-schema
+   ;;       bug21405 SOAP fails to encode double-float zero
+   ;;       bug17705 wsdl-include-url is defective
+   ;;       rfe7512  decode-wsdl-source should accept do-http-request's :protocol kw
+   3 1 ;;; delete *soap-version*, soap-version calls xmp-version
+   1   ;;; bug21565 wsdl decoder assumes soap-operation is always present
    ))
 (defun xmp-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
   (typecase v1
-    (integer (if (or (< (first *xmp-version*) v1)
-		     (and v2
-			  (or 
-			   (and (= (first *xmp-version*) v1)
-				(< (second *xmp-version*) v2))
-			   (and v3
-				(= (second *xmp-version*) v2)
-				(< (third *xmp-version*) v3)))))
-		 (if error-p
-		     (error "XMP Version ~A.~A.~A needed, but ~{~A.~A.~A~} is loaded."
-			    v1 (or v2 0) (or v3 0) *xmp-version*)
-		   nil)
-	       *xmp-version*))
-    (otherwise (format v1-or-s "XMP Version ~{~A.~A.~A~}" *xmp-version*))))
+    (integer
+     (if (or (< (first *xmp-version*) v1)
+	     (and v2
+		  (or 
+		   (and (= (first *xmp-version*) v1)
+			(< (second *xmp-version*) v2))
+		   (and v3
+			(= (second *xmp-version*) v2)
+			(< (third *xmp-version*) v3)))))
+	 (if error-p
+	     (error "XMP/SOAP/WSDL Version ~A.~A.~A needed, but ~{~A.~A.~A~} is loaded."
+		    v1 (or v2 0) (or v3 0) *xmp-version*)
+	   nil)
+       *xmp-version*))
+    (otherwise (format v1-or-s "XMP/SOAP/WSDL Version ~{~A.~A.~A~}" *xmp-version*))))
 
 #+soap-lxml (defun net.xml.sax::same-iri (x y) (net.xmp::same-uri x y))
     
@@ -671,35 +672,6 @@
 	     ;; (format t "~&; slot ~S is unbound~%" name)
 	     )))
     new))
-
-#+ignore
-(defmethod xmp-copy ((object xmp-connector)
-		     &key &allow-other-keys
-		     &aux (new (make-instance (class-of object)))
-		     )
-  (setf (xmp-destination-leader new) (xmp-destination-leader object)
-	(xmp-xml-encoding new)       (xmp-xml-encoding object)
-	(xmp-message-dns new) (xmp-message-dns object)
-	(xmp-base-dns new) (xmp-base-dns object)
-	(xmp-out-nss new) (xmp-out-nss object)
-	(xmp-in-nss new) (xmp-in-nss object)
-	(xmp-expected-elements new) (xmp-expected-elements object)
-	(xmp-inside-elements new) (xmp-inside-elements object)
-	(xmp-lisp-package new) (xmp-lisp-package object)
-	(xmp-trim-whitespace new) (xmp-trim-whitespace object)
-	(xmp-debug new) (xmp-debug object)
-	)
-  new)
-  
-#+ignore
-(defmethod xmp-copy :around ((object xmp-server-connector) &key &allow-other-keys)
-  (let ((new (call-next-method)))
-    (setf (xmp-server-enabled new) (xmp-server-enabled object)
-	  (xmp-server-start new) (xmp-server-start object)
-	  (xmp-server-exports new) (xmp-server-exports object)
-	  )
-    new))
-  
 
 
 
@@ -2294,9 +2266,7 @@
 	 (pk (or (xmp-default-package conn nss) (xmp-lisp-package conn)))
 	 (*package* (resolve-package pk)))
     (multiple-value-bind (xml ns)
-	(
-	 #+soap-pxml net.xml.parser:parse-xml
-	 #+soap-lxml net.xml.sax:parse-to-lxml	     
+	(net.xml.sax:parse-to-lxml	     
 	 source
 	 :content-only t
 	 :uri-to-package
@@ -3616,25 +3586,6 @@
 	(error "URI ~A returned error ~S ~S ~S"
 	       uri rc h ruri))))
   (when (and string file) (error "Ambiguous call."))
-
-  #+soap-pxml
-  (let (all)
-    (multiple-value-bind (xml pns)
-	(cond (string 
-	       (net.xml.parser:parse-xml string :content-only t))
-	      (file   (with-open-file 
-		       (s file)
-		       (net.xml.parser:parse-xml s :content-only t))))
-      (declare (ignore xml))
-      (dolist (p pns) 
-	(push
-	 ;; Get the exact spelling of the URI string as found by the parser.
-	 (format nil "~A" (car p))
-	 all)
-	(delete-package (cdr p)))
-      all))
-
-  #+(or soap-lxml soap-sax)
   (cond (string (xmp-namespaces-from-string string))
 	(file   (xmp-namespaces-from-file file)))
   )

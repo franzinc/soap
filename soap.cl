@@ -22,14 +22,16 @@
 ;; Loader that picks the correct fasl for the current case-mode.
 
 #+(version= 9 0)
-(sys:defpatch "soap" 1 ;;; ALSO CHANGE: incf the # in Makefile
-  "v1: decode double-float zero, suppress whitespace, include/import option fixes."
+(sys:defpatch "soap" 2 
+  "v2: avoid no-applicable-method error for schema-raw-attribute;
+v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :type :system
   :post-loadable t)
 
 #+(version= 8 2)
-(sys:defpatch "soap" 1 ;;; ALSO CHANGE: incf the # in Makefile
-  "v1: decode double-float zero, suppress whitespace, include/import option fixes."
+(sys:defpatch "soap" 2 
+  "v2: avoid no-applicable-method error for schema-raw-attribute;
+v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :type :system
   :post-loadable t)
 

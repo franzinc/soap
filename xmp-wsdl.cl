@@ -1300,10 +1300,10 @@
 	 )
     (let* ((op-name (schema-component-name b))
 	   (soap-op  (schema-single-part b :soap-operation))
-	   (action   (schema-raw-attribute soap-op "soapAction"))
+	   (action   (when soap-op (schema-raw-attribute soap-op "soapAction")))
 	   (messages (cdr (wsdl-messages conn)))
 	   style-key
-	   (style    (let ((s (or (schema-raw-attribute soap-op "style")
+	   (style    (let ((s (or (when soap-op (schema-raw-attribute soap-op "style"))
 				  (wsdl-soap-style conn)))
 			   rpcelt enames)
 		       #+ignore
@@ -1329,7 +1329,7 @@
 		       (when *wsdl-debug* 
 			 (format
 			  t "~&;WSDL style=~S raw=~S conn=~S rpcelt=~S enames=~S ~%"
-			  s (schema-raw-attribute soap-op "style")
+			  s (when soap-op (schema-raw-attribute soap-op "style"))
 			  (wsdl-soap-style conn) rpcelt enames))
 		       s))
 	   (bind-in (schema-single-part b :input))
