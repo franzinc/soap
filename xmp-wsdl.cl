@@ -1095,10 +1095,16 @@
 	 )
     (cond 
      ((and name type (null elt)) (values name type))
-     ((and elt (null type))(if (schema-lookup-element conn elt)
-			       (values elt nil)
-			     (error "cannot find message element def")))
-     (t (error "strange message part")))))
+     ((and elt (null type))
+      (cond ((schema-lookup-element conn elt) (values elt nil))
+	    ((schema-lookup-type conn elt) (values name elt))
+	    ;; spr40318 - When the reply is not complex, it could be
+	    ;;  a built-in type (SOAP defines all the XSD types).
+	    ;; This might return a false positive if additional types
+	    ;;  exist in the Lisp environment.
+	    ((xmp-find-type conn elt :in) (values name elt))
+	    (t (error "cannot find message element def ~S" part))))
+     (t (error "strange message part ~S" part)))))
 
 
 (defmethod wsdl-message-part-element ((conn wsdl-file-connector) part)
@@ -1292,7 +1298,11 @@
     (symbol (case (wsdl-option conn :response)
 	      (:symbol (wsdl-make-symbol conn resp nil (symbol-package op-name)))
 	      (otherwise resp)))
-    (otherwise (error "Element name must be symbol or string: ~S" op-name))))
+    ;; [bug21863] In zero arg case, this may be a local :element spec.
+    (cons (if (eq :element (car op-name))
+	      (second op-name)
+	    (error "Response name must be a named :element: ~S" op-name)))
+    (otherwise (error "Response name must be symbol or string: ~S" op-name))))
 
 (defmethod wsdl-bind-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
   (declare (ignore eval))
@@ -1390,7 +1400,11 @@
 		       (error "Cannot find output message ~A" out-msg-name))))
 	   (out-parts (when out-msg
 			(schema-collected-parts out-msg :message :part)))
-	   (cx (when in-msg (position in-msg messages)))
+	   (cx (or (when in-msg (position in-msg messages))
+		   ;; If message has no inputs, there will only be the result
+		   ;;  message definition.  Index will be unique since both
+		   ;;  kinds of messages are in the same list.  [bug21863]
+		   (when out-msg (position out-msg messages))))
 	   comment done-form doc-type doc-ret ret-name)
 
       (when *wsdl-debug*
@@ -1398,8 +1412,9 @@
 		op-name in-msg-name (when in-msg (length in-parts)) 
 		out-msg-name (when out-msg (length out-parts))))
 
-      (let (op-rename info)
-	(when in-msg
+      (let (op-rename op-redef info)
+	(cond
+	 (in-msg
 	  (multiple-value-setq (done-form op-rename doc-type)
 	    (wsdl-do-element conn style op-name action
 			     (if (and (eq style-key :document) (eql 1 (length in-parts)))
@@ -1407,10 +1422,19 @@
 			       t)
 			     bind-in in-msg))
 	  (when done-form (wsdl-index-form conn done-form))
+	  (setq op-redef op-rename)
 	  (when *wsdl-debug*
 	    (format t "~&;WSDL in-msg done-form=~S  op-rename=~S  doc-type=~S ~%"
 		    done-form op-rename doc-type))
 	  )
+	 (t 
+	  ;; If there are no arguments, the operation name is already known. [bug21863]
+	  (setq op-rename op-name)
+	  (setq op-redef `(:element ,op-name 
+				    ;; In zero arg case, this type will never be
+				    ;;  used, so any type will do.  [bug21863]
+				    ,(intern "string" (find-package :net.xmp.schema))
+				    ))))
 	(when out-msg
 	  (multiple-value-setq (done-form ret-name doc-ret)
 	    (wsdl-do-element
@@ -1422,7 +1446,8 @@
 	    (format t "~&;WSDL out-msg done-form=~S  ret-name=~S  doc-ret=~S  ~%"
 		    done-form ret-name doc-ret))
 	  )
-	(when (and in-msg out-msg);;???  in-out messages notification messages...
+	;; [bug21863] Generate a client call function if there are arguments _OR_ a reply.
+	(when (or in-msg out-msg);;???  in-out messages notification messages...
 	  (wsdl-index-form
 	   conn
 	   (let* ((def-name (let ((context :call))
@@ -1495,12 +1520,12 @@
 		      #'values
 		      ,(if (and one-def (eq style-key :rpc))
 			   `(call-soap-method ,(wsdl-file-local-name conn "conn")
-					      ,(qt op-rename)
+					      ,(qt op-redef)
 					      ,(string (part-name one-part))
 					      (list ,@arglist))
 			 `(call-soap-method
 			   ,(wsdl-file-local-name conn "conn")
-			   ,(qt op-rename)
+			   ,(qt op-redef)
 			   ,@arglist))
 		      ,(wsdl-file-local-name conn "conn")))))
 	       (:server

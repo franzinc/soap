@@ -54,7 +54,9 @@
    ;;       bug17705 wsdl-include-url is defective
    ;;       rfe7512  decode-wsdl-source should accept do-http-request's :protocol kw
    3 1 ;;; delete *soap-version*, soap-version calls xmp-version
-   1   ;;; bug21565 wsdl decoder assumes soap-operation is always present
+   ;;1   ;;; bug21565 wsdl decoder assumes soap-operation is always present
+   2   ;;; bug21863 fix WSDL gen of SOAP call with zero args
+
    ))
 (defun xmp-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
   (typecase v1
@@ -1528,6 +1530,7 @@
 	 dd)
     (and def (xnm-read-only def)
 	 (or read-only
+	     ;; Ie read-only can only be set at initial creation time.
 	     (error "Cannot redefine namespace-map ~S" name)))
     (when (loop
 	   (when (null parts) (return nil))

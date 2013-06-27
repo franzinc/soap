@@ -1448,24 +1448,24 @@
 
 
 (eval-when (compile load eval) (defvar *soap-deftypes* nil))
-(defmacro def-soap-simple-content (elt &key class keywords
+(defmacro def-soap-simple-content (elts &key class keywords
 				       (decode-class class) (decode-keys keywords)
 				       decode
 				       (encode-class class) (encode-keys keywords)
 				       encode
 				       check-type
-				       &aux lastelt eltref)
+				       &aux lastelt elt eltref)
   ;; If elt argument is a form, it must always be wrapped!
   (or class
       (and (if decode decode-class t) (if encode encode-class t))
       (error "def-soap-simple-content missing class"))
-  (if (consp elt)
-      (setf lastelt (first (last elt)))
-    (setf lastelt elt))
+  (if (consp elts)
+      (setf lastelt (first (last elts)))
+    (setf lastelt elts))
   (when (symbolp lastelt) (setf lastelt (list 'quote lastelt)))
   `(progn
-     ,@(when (consp elt)
-	 (do ((tl elt (cdr tl)) res)
+     ,@(when (consp elts)
+	 (do ((tl elts (cdr tl)) res)
 	     ((atom tl) (reverse res))
 	   (setf elt (first tl))
 	   (if (symbolp elt)

@@ -1,6 +1,10 @@
 
 (in-package :user)
 
+;; This is the top-level build script for the SOAP module.
+;; Can only be delivered as a full-fasl patch because the
+;; xmp-symbol macro builds a table of symbols at compile time.
+
 #-soap-two-fasls
 (let* ((filenames (list "xmp-base"
 			"xmp-aserve"

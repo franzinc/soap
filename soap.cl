@@ -20,17 +20,20 @@
 ;; $Id: soap.cl,v 2.12 2009/03/17 18:48:48 mm Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
+;; THE BUILD SCRIPT IS IN build.cl.
 
 #+(version= 9 0)
-(sys:defpatch "soap" 2 
-  "v2: avoid no-applicable-method error for schema-raw-attribute;
+(sys:defpatch "soap" 3 
+  "v3: generate zero arg calls from WSDL;
+v2: avoid no-applicable-method error for schema-raw-attribute;
 v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :type :system
   :post-loadable t)
 
 #+(version= 8 2)
-(sys:defpatch "soap" 2 
-  "v2: avoid no-applicable-method error for schema-raw-attribute;
+(sys:defpatch "soap" 3 
+  "v3: generate zero arg calls from WSDL;
+v2: avoid no-applicable-method error for schema-raw-attribute;
 v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :type :system
   :post-loadable t)
