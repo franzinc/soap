@@ -29,6 +29,7 @@
 
 (test-soap-local) --> test report from with-tests wrapper
                       (soap-local-tests)  - just the tests
+(test-soap-files) --> run wsdl tests in xmp-file-tests
 
 (test-soap-remote) --> test report from with-tests wrapper
                        (soap-remote-tests)  - just the tests
@@ -40,7 +41,7 @@
 
 Individual tests:
 
-;; Assumes ./xmp-test folder is visible
+;; If ./xmp-file-tests folder is visible
 (soap-files-tests)
 
 - From soapex.cl and soapval1.cl -
@@ -134,7 +135,7 @@ Individual tests:
 
 
 
-(defun test-soap-local (&key verbose (files "xmp-test") &aux r)
+(defun test-soap-local (&key verbose (files "xmp-file-tests") &aux r)
   (with-tests
    (:name "SOAP module (local)")
    (setf *error-protect-tests* t)
@@ -142,24 +143,25 @@ Individual tests:
   r)
 
 
-(defun test-soap-files (&key verbose (folder "xmp-test") &aux r v)
+(defun test-soap-files (&key verbose (folder "xmp-file-tests") &aux r v)
   (with-tests
    (:name "SOAP file tests")
    (setf *error-protect-tests* t)
    (multiple-value-setq (r v) (soap-files-tests :folder folder :verbose verbose)))
   (values r v))
 
-(defun soap-files-tests (&key verbose (folder "xmp-test") &aux up r v)
+(defun soap-files-tests (&key verbose (folder "xmp-file-tests") &aux up r v)
   (unwind-protect
       (let ()
 	(tpl:do-command :cd folder)
 	(setf up t)
 	(load (compile-file "xmp-driver"))
 	(multiple-value-setq (r v) (funcall 'xmp-run-test-files :verbose verbose)))
+    (ignore-errors (delete-file "xmp-driver.fasl"))
     (when up 	(tpl:do-command :cd "..")))
   (values r v))
 
-(defun soap-local-tests (&key verbose (files "xmp-test"))
+(defun soap-local-tests (&key verbose (files "xmp-file-tests"))
   (macrolet ((with-timer
 	      (&rest forms &aux (tag (cond ((null forms) "empty")
 				((consp (first forms)) (caar forms))

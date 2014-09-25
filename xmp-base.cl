@@ -678,6 +678,14 @@
 
 
 (defmethod xmp-decode-message ((conn xmp-string-in-connector) data)
+  ;; Analyze a parsed XML document: data -> list of LXML elements from a parser.
+  ;; 
+  ;; xmp-begin-message is called to note the start of the analysis;
+  ;;                   returns spec of expected top element in LXML.
+  ;; xmp-decode-body is called to perform the analysis;
+  ;;                   returns list of data collected by analysis functions,
+  ;;                       and list of types collected by analysis functions.
+  ;; xmp-end-message is called to compute final result of decode call.
   (setf (xmp-in-nss conn) (xmp-initial-nss conn nil))
   (setf (xmp-message-attributes  conn) nil)
   (setf (xmp-expected-elements conn)
@@ -1994,21 +2002,31 @@
 
 (defmethod xmp-decode-qualified-name ((conn t) (data string) nss
 				      &key suppress-default)
-  ;; second value is name that should appear as a complex-part
+  ;; First value is a symbol if the string can be mapped to a Lisp
+  ;;  symbol;  otherwise it is the input string.
+  ;; Second value is name that should appear as a complex-part.
   (let* ((end (length data))
 	 (qp (position #\: data))
 	 name  pk)
-    (cond ((or (eql qp 0) (eql qp (1- end))) (values data data))
-	  ((string-equal data "xml:" :start1 0 :end1 (min 4 end))
+    (cond ((or (eql qp 0) (eql qp (1- end)))
+	   ;; :xxx or xxx: -- This is not a well-formed name or qname in 
+	   ;; XML;  just pass it through.
+	   (values data data))
+	  ((and (eql qp 3) (string-equal data "xml" :start1 0 :end1 3))
+	   ;; xml:xxx -- This is a name in the reserved XML namespace.
 	   (setf name (subseq data 4))
 	   (values (intern name :net.xmp.xml) name))
-	  ((if qp
-	       (and (eql qp 5) (string-equal data "xmlns" :start1 0 :end1 5))
-	     (string-equal data "xmlns"))
+	  ((and (< 4 end)
+		(string-equal data "xmlns" :start1 0 :end1 5)
+		(or (null qp) (eql qp 5)))
+	   ;; The is valid syntax for an attribute name declaring a
+	   ;; namespace;  anywhere else it is random data.
 	   (values data data))
 	  ((setf pk (xmp-prefix-to-package
 		     conn (when qp (subseq data 0 qp)) nss
 		     :suppress-default suppress-default))
+	   ;; If the name can be mapped to a Lisp symbol, both values
+	   ;;  are that symbol.
 	   (setf name (intern (if qp (subseq data (1+ qp)) data) pk))
 	   (values name name))
 	  ((null qp)

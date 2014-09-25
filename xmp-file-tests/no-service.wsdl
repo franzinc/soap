@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:shared="http://soapentrypoint.aipsafe.cz/IDL-Shared/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:tns="http://soapentrypoint.aipsafe.cz/IDL-Shared/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" name="IDL-Mapped" targetNamespace="http://soapentrypoint.aipsafe.cz/IDL-Shared/">
+  <wsdl:types>
+    <schema xmlns="http://www.w3.org/2001/XMLSchema" targetNamespace="http://soapentrypoint.aipsafe.cz/IDL-Shared/">
+<import namespace="http://schemas.xmlsoap.org/wsdl/"/>
+<import namespace="http://schemas.xmlsoap.org/soap/encoding/"/>
+<simpleType name="SystemExceptionName">
+<restriction base="string">
+<enumeration value="UNKNOWN"/>
+<enumeration value="BAD_PARAM"/>
+<enumeration value="NO_MEMORY"/>
+<enumeration value="IMP_LIMIT"/>
+<enumeration value="COMM_FAILURE"/>
+<enumeration value="INV_OBJREF"/>
+<enumeration value="NO_PERMISSION"/>
+<enumeration value="INTERNAL"/>
+<enumeration value="MARSHAL"/>
+<enumeration value="INITIALIZE"/>
+<enumeration value="NO_IMPLEMENT"/>
+<enumeration value="BAD_TYPECODE"/>
+<enumeration value="BAD_OPERATION"/>
+<enumeration value="NO_RESOURCES"/>
+<enumeration value="NO_RESPONSE"/>
+<enumeration value="PERSIST_STORE"/>
+<enumeration value="BAD_INV_ORDER"/>
+<enumeration value="TRANSIENT"/>
+<enumeration value="FREE_MEM"/>
+<enumeration value="INV_IDENT"/>
+<enumeration value="INV_FLAG"/>
+<enumeration value="INTF_REPOS"/>
+<enumeration value="BAD_CONTEXT"/>
+<enumeration value="OBJ_ADAPTER"/>
+<enumeration value="DATA_CONVERSION"/>
+<enumeration value="OBJECT_NOT_EXIST"/>
+<enumeration value="TRANSACTION_REQUIRED"/>
+<enumeration value="TRANSACTION_ROLLEDBACK"/>
+<enumeration value="INVALID_TRANSACTION"/>
+<enumeration value="INV_POLICY"/>
+<enumeration value="CODESET_INCOMPATIBLE"/>
+<enumeration value="REBIND"/>
+<enumeration value="TIMEOUT"/>
+<enumeration value="TRANSACTION_UNAVAILABLE"/>
+<enumeration value="TRANSACTION_MODE"/>
+<enumeration value="BAD_QOS"/>
+<enumeration value="INVALID_ACTIVITY"/>
+<enumeration value="ACTIVITY_COMPLETED"/>
+<enumeration value="ACTIVITY_REQUIRED"/>
+</restriction>
+</simpleType>
+<complexType name="SystemException">
+<sequence>
+<element name="name" type="shared:SystemExceptionName"/>
+<element name="completion" type="shared:CompletionStatus"/>
+<element name="minor" type="xsd:int"/>
+</sequence>
+</complexType>
+<complexType name="ArrayOfboolean">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:boolean[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfObjectReference">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="shared:ObjectReference[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOffloat">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:float[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfunsignedLong">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:unsignedLong[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<simpleType name="CompletionStatus">
+<restriction base="string">
+<enumeration value="COMPLETED_YES"/>
+<enumeration value="COMPLETED_NO"/>
+<enumeration value="COMPLETED_MAYBE"/>
+</restriction>
+</simpleType>
+<complexType name="ObjectReference">
+<sequence>
+<element name="corbaurl" type="xsd:string"/>
+<element name="wsendpoint" type="xsd:anyURI"/>
+</sequence>
+</complexType>
+<complexType name="ArrayOfdateTime">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:dateTime[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOflong">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:long[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfshort">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:short[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfArrayOfstring">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="shared:ArrayOfstring[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfunsignedInt">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:unsignedInt[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfint">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:int[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfanyType">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:anyType[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfunsignedShort">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:unsignedShort[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfArrayOfanyType">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="shared:ArrayOfanyType[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfArrayOflong">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="shared:ArrayOflong[]"/>
+</restriction>
+</complexContent>
+</complexType>
+<complexType name="ArrayOfstring">
+<complexContent>
+<restriction base="soapenc:Array">
+<attribute ref="soapenc:arrayType" wsdl:arrayType="xsd:string[]"/>
+</restriction>
+</complexContent>
+</complexType>
+</schema>
+  </wsdl:types>
+</wsdl:definitions>

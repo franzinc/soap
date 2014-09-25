@@ -1217,13 +1217,14 @@
 
 (defmethod schema-targeted-name ((conn schema-file-connector) tname
 				 &key (nss :in) (suppress-default t))
+  ;; Returns two values, like xmp-decode-qualified-name.
   (let* ((name (string tname))
 	 (targets (schema-target conn))
-	 (target (first targets))
+	 (target (first targets))  ;;; Use the target at the top of the stack.
 	 (tp (when target (xmp-uri-to-package conn target nss)))
 	 (*package* (resolve-package tp)))
     (if tp
-	;; if there is a targetNamaspace, set it as default and use it
+	;; if there is a targetNamespace, set it as default and use it
 	(xmp-decode-qualified-name conn name (cons (list target) nss))
       ;; otherwise there is no default that applies
       (xmp-decode-qualified-name conn name nss :suppress-default suppress-default))))

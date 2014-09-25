@@ -21,6 +21,22 @@
 
 ;; WSDL support
 
+;; 3 kinds of work:
+;;   - Decode LXML of parsed WSDL definitions.
+;;            decode-wsdl-* -> xmp-decode-* 
+;;                   
+;;   - Generate client code from decoded data.
+;;            make-client-interface -> wsdl-gen-interface
+;;   - Generate server code from decoded data.
+;;            make-server-interface
+;;               -> wsdl-gen-interface (was wsdl-make-interface)
+;;                  ... -> wsdl-gen-operation (was wsdl-bind-operation)
+;;                         ... -> wsdl-gen-element (was wsdl-do-element)
+;; 
+;;   - Create a WSDL definition file from a Lisp 
+;;                   server definition.
+;;            encode-wsdl-file ->xmp-encode-*
+
 ;;; targetNamespace attribute in wsdl:definitions
 ;;;    applies to message port and service names
 ;;; namespace attribute in soap:body
@@ -35,6 +51,75 @@
 ;;; style=document there should be only one part
 ;;;            each part has name and element attrs, represents one Body element
 ;;;            use="literal"
+
+
+
+;; WSDL syntax notes (mm 2014-06)   --- Begin
+;;   Namespaces:   W:WSDL   S:SOAP   X:XSD   D:Schema
+;;
+
+;; style="rpc"
+;; <W:message name="methodName">
+;;     <W:part name="subElt1" type="" />
+;;     <W:part name="subElt2" type="" />
+;;     ...
+;; </W:message>
+;; SOAP Body is single element "methodName"
+;;      with sub-elements specified by parts.
+;;
+;;
+;; style="document"    portType/operation name="methodName"
+;; <W:message name="nameMentionedInPortTypeOnly">
+;;     <W:part name="dummy" element="elementName" />
+;;     ...
+;; </W:message>
+;; SOAP Body is sequence of elements specified by parts.
+;;      SOAP method is specified by soapAction header?
+;;
+;; 
+;; style="document" document-literal-wrapped convention
+;; <W:message name="nameMentionedInPortTypeOnly">
+;;     <W:part name="dummy" element="singleTopElementWrapperName" />
+;; </W:message>
+;;
+;; <W:portType name="">
+;;     <W:operation name="">
+;;          <W:input message="qn" />
+;;          <W:output message="qn" />
+;;          <W:fault name="qn" message="qn" />
+;;     </W:operation>
+;;     ...
+;; </W:portType>
+;;
+;; <W:binding name="" type="qn-of-portType">
+;;      <S:binding style="rpc|document" transport="" />
+;;      <W:operation name="">
+;;           <S:operation soapAction="" />
+;;           <W:input>
+;;                <S:body namespace="message-namespace" use="literal|encoded" />
+;;           </W:input>
+;;           <W:output> ... </W:output>
+;;           <W:fault><S:fault ... /> ... </W:fault>
+;;      </W:operation>
+;;      ...     
+;; </W:binding>
+;;
+;; <W:service name="" >
+;;      <W:documentation>xxxxxx</W:documentation>
+;;      <W:port name="" binding="qn-of-binding" >
+;;            <S:address location="URL"
+;;      </W:port>
+;;      ...
+;; </W:service>
+;; SOAP Body is a single element specified in element attribute of the single part.
+;;
+;;
+;; use="encoded"    Send type information in SOAP message
+;;                  Values encoded by standard Schema serialization conventions
+;; use="literal"    Do not send type information in SOAP message
+;;                  Values encoded and decoded by explicit rules in WSDL Schema part
+;;
+;; WSDL syntax notes (mm 2014-06)   --- END
 
 
 (in-package :net.xmp.soap)
@@ -311,7 +396,9 @@
 
    (soap-style :accessor wsdl-soap-style :initform nil)
    (soap-address :accessor wsdl-soap-address :initform nil)
-   (operations   :accessor wsdl-operations   :initform nil)
+   (operations   :accessor wsdl-operations  
+		 ;; All the operations declared in the relevant <portType> definition.
+		 :initform nil)
    (expand-singleton :accessor wsdl-expand-singleton :initform nil)
 
    (undef-ns   :accessor wsdl-undef-ns   :initform nil)
@@ -510,6 +597,7 @@
 	  (otherwise (error "Error in ~A: ~S ~A" label e e)))
       (values-list v))))
 
+;; Called during analysis.
 (defmethod xmp-begin-element :around ((conn wsdl-file-connector)
 				      (elt (eql (xsd "include")))
 				      &rest options
@@ -562,6 +650,7 @@
 	    (list* :included filter (schema-component-raw-attributes x))))
     (values-list vals)))
 
+;; Called during analysis.
 (defmethod xmp-begin-element :around ((conn wsdl-file-connector)
 				      (elt (eql (xsd "import")))
 				      &rest options
@@ -614,11 +703,13 @@
 	    (list* :imported filter (schema-component-raw-attributes x))))
     (values-list vals)))
 
+;; Exported, used as :import arg in call to wsdl-decode-*.
 (defmethod wsdl-include-file ((conn wsdl-file-connector) from)
   (if (probe-file from)
       (file-contents from)
     (error "File not found.")))
 
+;; Exported, used as :include arg in call to wsdl-decode-*.
 (defmethod wsdl-include-url ((conn wsdl-file-connector) from &rest http-args)
   ;; If a timeout is desired, caller can add a timeout arg that will be
   ;;  passed through to do-http-request.
@@ -632,6 +723,7 @@
   
 
 
+;; Called during analysis.
 (defmethod xmp-simple-content ((conn wsdl-file-connector)
 			       (elt (eql (wsdl "documentation"))) data
 			       &rest options 
@@ -655,6 +747,7 @@
       (pushnew found (wsdl-targets conn) :test #'same-uri)
       found)))
 
+;; Called during analysis.
 (defmethod xmp-decode-element :around ((conn wsdl-file-connector)
 				      (elt (eql (wsdl "definitions"))) (data t)
 				      &rest options
@@ -1110,8 +1203,14 @@
 (defmethod wsdl-message-part-element ((conn wsdl-file-connector) part)
   (wsdl-message-part-parts conn part))
 
-(defmethod wsdl-do-element
-  (conn style method-name-spec action intern-name bind msg
+(defmethod wsdl-gen-element
+  (conn style    ;;; SOAP style attribute: "document" | "rpc" 
+	method-name-spec  ;;; name attribute of <operation> in <binding>
+	                  ;;; or (response-name renamed-resp-name)
+	action   ;;; soapAction attribute
+	intern-name   ;;; nil | t | :doc
+	bind     ;;; <input> or <output> in <operation> in <binding>
+	msg      ;;; <message> definition for bind elt
 	&aux
 	(method-wsdl-name (if (consp method-name-spec)
 			      (first method-name-spec)
@@ -1304,7 +1403,9 @@
 	    (error "Response name must be a named :element: ~S" op-name)))
     (otherwise (error "Response name must be symbol or string: ~S" op-name))))
 
-(defmethod wsdl-bind-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
+;; Called to generate Lisp code.
+(defmethod wsdl-gen-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
+  ;; Arg b is one operation element from the selected binding instance.
   (declare (ignore eval))
   (flet ((part-name (part) (wsdl-message-part-element conn part))
 	 )
@@ -1312,76 +1413,40 @@
 	   (soap-op  (schema-single-part b :soap-operation))
 	   (action   (when soap-op (schema-raw-attribute soap-op "soapAction")))
 	   (messages (cdr (wsdl-messages conn)))
-	   style-key
-	   (style    (let ((s (or (when soap-op (schema-raw-attribute soap-op "style"))
-				  (wsdl-soap-style conn)))
-			   rpcelt enames)
-		       #+ignore
-		       (when (string-equal s "document")
-			 ;; True document style defines all messages
-			 ;;    with exactly one part???
-			 ;;    and with unique element names???
-			 ;;mm: but we must only look at input messages, and the
-			 ;; loop below looks at all -- just skip this check for now...
-			 (dolist (m messages)
-			   (let (e p)
-			     (setf p (schema-collected-parts m :message :part))
-			     (or (and p (null (cdr p))
-				      (null (member (setf e (schema-decoded-attribute
-							     (first p) "element"))
-						    enames)))
-				 (return (setf rpcelt m s "rpc")))
-			     (push e enames)
-			     )))
-		       ;;(format t "~&~S~%" enames)
-		       (cond ((string-equal s "document") (setf style-key :document))
-			     (t (setf style-key :rpc)))
-		       (when *wsdl-debug* 
-			 (format
-			  t "~&;WSDL style=~S raw=~S conn=~S rpcelt=~S enames=~S ~%"
-			  s (when soap-op (schema-raw-attribute soap-op "style"))
-			  (wsdl-soap-style conn) rpcelt enames))
-		       s))
+	   (style    (or (when soap-op (schema-raw-attribute soap-op "style"))
+			 (wsdl-soap-style conn)))
+	   (style-key (cond ((string-equal style "document") :document)
+			    ((string-equal style "rpc") :rpc)
+			    (t (warn "Missing style attribute, assume RPC.")
+			       :rpc)))
 	   (bind-in (schema-single-part b :input))
 	   (bind-out (schema-single-part b :output))
-
-	   ;; <binding>
-	   ;;  <in-or-out> <:soap-body
-	   ;;                     wsdl:use= encoded|literal
-	   ;;                     wsdl:namespace= URIstring
-	   ;;                     wsdl:encodingStyle= URIstring
-	   ;;                     wsdl:parts=  nmtokens          ???
-	   ;;                     />
-	   ;;        soap:header  ???
-	   ;;        soap:fault   ???
-	   ;;    </in-or-out> </binding>
-
 	   (opdefs   (let (all)
 		       (dolist (op (wsdl-operations conn) all)
 			 (when (equal op-name (schema-component-name op))
 			   (push op all)))))
-
 	   (opdef  (cond ((null opdefs) (error "Cannot find operation ~A" op-name))
 			 ((null (cdr opdefs)) (first opdefs))
 			 (t
 			  ;; more than one operation - overloaded op name
 			  ;; find the one with matching input or output
+			  ;; Assume that first match is the only match.
 			  (or
-			  (cond (bind-in
-				 (dolist (op opdefs)
-				   (let ((op-in (schema-single-part op :input)))
-				     (and op-in
-					  (equal (schema-component-name bind-in)
-						 (schema-component-name op-in))
-					  (return op)))))
-				(bind-out
-				 (dolist (op opdefs)
-				   (let ((op-out (schema-single-part op :output)))
-				     (and op-out
-					  (equal (schema-component-name bind-out)
-						 (schema-component-name op-out))
-					  (return op))))))
-			  (error "Cannot find overloaded operation ~A" op-name)))))
+			   (cond (bind-in
+				  (dolist (op opdefs)
+				    (let ((op-in (schema-single-part op :input)))
+				      (and op-in
+					   (equal (schema-component-name bind-in)
+						  (schema-component-name op-in))
+					   (return op)))))
+				 (bind-out
+				  (dolist (op opdefs)
+				    (let ((op-out (schema-single-part op :output)))
+				      (and op-out
+					   (equal (schema-component-name bind-out)
+						  (schema-component-name op-out))
+					   (return op))))))
+			   (error "Cannot find overloaded operation ~A" op-name)))))
 	   (op-in    (schema-single-part opdef :input))
 	   (in-msg-name   (when op-in (schema-decoded-attribute op-in "message")))
 	   (op-out   (schema-single-part opdef :output))
@@ -1407,16 +1472,18 @@
 		   (when out-msg (position out-msg messages))))
 	   comment done-form doc-type doc-ret ret-name)
 
+
       (when *wsdl-debug*
-	(format t "~&;WSDL op=~S  in-msg=~S ~S  out-msg=~S ~S~%" 
-		op-name in-msg-name (when in-msg (length in-parts)) 
+	(format t "~&;WSDL op=~S ~A in-msg=~S ~S  out-msg=~S ~S~%" 
+		op-name style in-msg-name (when in-msg (length in-parts)) 
 		out-msg-name (when out-msg (length out-parts))))
 
+;;; mm 2014-07-10: stop here ??? ??? ??? ??? 
       (let (op-rename op-redef info)
 	(cond
 	 (in-msg
 	  (multiple-value-setq (done-form op-rename doc-type)
-	    (wsdl-do-element conn style op-name action
+	    (wsdl-gen-element conn style op-name action
 			     (if (and (eq style-key :document) (eql 1 (length in-parts)))
 				 :doc
 			       t)
@@ -1437,7 +1504,7 @@
 				    ))))
 	(when out-msg
 	  (multiple-value-setq (done-form ret-name doc-ret)
-	    (wsdl-do-element
+	    (wsdl-gen-element
 	     conn style 
 	     (list (wsdl-response-name conn op-name) (wsdl-response-name conn op-rename))
 	     nil nil bind-out out-msg))
@@ -1660,11 +1727,11 @@
 
 (defmethod make-client-interface ((conn wsdl-file-connector) service destination
 				  &rest args)
-  (apply 'wsdl-make-interface conn service destination :client args))
+  (apply 'wsdl-gen-interface conn service destination :client args))
 
 (defmethod make-server-interface ((conn wsdl-file-connector) service destination
 				  &rest args)
-  (apply 'wsdl-make-interface conn service destination :server args))
+  (apply 'wsdl-gen-interface conn service destination :server args))
 				  
 (defmethod wsdl-file-local-name ((conn wsdl-file-connector) form &optional preserve
 			     &aux (file-package (wsdl-file-package conn)) pos)
@@ -2068,7 +2135,7 @@
       (format stream "~A~%~{     ~S~%~}~%" 
 	      (first (first def)) (cdr def))))))
 
-(defmethod wsdl-make-interface ((conn wsdl-file-connector) service destination
+(defmethod wsdl-gen-interface ((conn wsdl-file-connector) service destination
 				mode
 				&key
 				port verbose
@@ -2097,12 +2164,12 @@
 				object-access xml-syntax generate-comments
 
 				&aux
-				input-args
+				input-args ;;; (service binding portType)
 				w open dstream tstream dfile tfile topen
 				cstream copen cfile pstream popen pfile
 				head-forms tail-forms class-forms wrap-forms post-forms
 				sdef bname port-name pdef opdefs bdef
-				binding btype url
+				binding url
 				(*xmp-warning-leader* "WSDL"))
   (setf input-args (list service port))
   (or service (setf service 0))
@@ -2110,28 +2177,30 @@
   (and (numberp service)
        (setf w (nth service (wsdl-service-names conn)))
        (setf service w))
-  (cond ((eq service :none) (push nil input-args))
+  (cond ((eq service :none))
 	((setf sdef (schema-collected-component
+		     ;; Locate the specified <service> definition.
 		     conn #'wsdl-services #'schema-component-name service t))
 	 (multiple-value-setq (bname url)
+	   ;; Locate the name of the binding specified by the port name.
 	   (wsdl-service-binding-names conn sdef port t))
 	 (setf bdef (or
 		     ;; xmethods.com QueryInterfaceService uses the wrong namespace
 		     (schema-lookup-component
 		      conn #'wsdl-bindings #'schema-component-name bname)
 		     (error "Cannot find binding ~A" bname)))
+	 ;; Locate the specified <binding> definition.
 	 (setf binding bdef)
-	 (setf btype   (schema-decoded-attribute bdef "type"))
-	 (setf port-name btype)
+	 (setf port-name (schema-decoded-attribute bdef "type"))
+	 ;; Locate the <portType> definition associated with this <binding>.
 	 (setf pdef (or
 		     ;; Some WSDLs seem to have sloppy namespace tagging 
 		     ;;  ie "dConverterSOAP" in XMethods
 		     (schema-lookup-component
 		      conn #'wsdl-port-types #'schema-component-name port-name)
 		     (error "Cannot find portType ~A" port-name)))
-	 (push (list service (schema-component-name sdef) bname port-name 
-		     (schema-component-name pdef))
-	       input-args)
+	 (setq input-args 
+	       (list (schema-component-name sdef) bname (schema-component-name pdef)))
 	 (setf opdefs (schema-collected-parts pdef :port-type :operation))
 	 )
 	(t (error "Cannot find service ~S" service)))
@@ -2289,9 +2358,9 @@
 
 	  (when binding
 	    (dolist (b (schema-component-content binding))
-	    (case (schema-element-key b)
-	      (:operation
-	       (wsdl-bind-operation conn b mode eval prefix suffix)))))
+	      (case (schema-element-key b)
+		(:operation
+		 (wsdl-gen-operation conn b mode eval prefix suffix)))))
 
 	  (case mode
 	    (:server
@@ -2464,9 +2533,9 @@
 					   (second (schema-source conn)))
 				   (list (schema-source conn) "")))))
 
-		     (format nil "    Service: ~A" (second (first input-args)))
-		     (format nil "    Binding: ~A" (third (first input-args)))
-		     (format nil "   portType: ~A" (fifth (first input-args)))
+		     (format nil "    Service: ~A" (first input-args))
+		     (format nil "    Binding: ~A" (second input-args))
+		     (format nil "   portType: ~A" (third input-args))
 		     1))
 		   )
 
