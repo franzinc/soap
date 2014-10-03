@@ -6,7 +6,7 @@
       (out (xmpt-out))
       (out2 (xmpt-out "out2"))
       )
-  (xmpt-error (make-client-interface wconn 0 out :text-file nil)
+  (xmpt-warning (make-client-interface wconn 0 out :text-file nil)
 	      :matching ".*type may be defined in included Schema.*"
 	      :fail-info (xmpt-fail-info :make-client-no-import))
   )

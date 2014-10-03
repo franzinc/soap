@@ -1468,6 +1468,8 @@ Individual tests:
 (defpackage :tnsw (:use))
 (defpackage :tnst (:use))
 
+(defvar *xmeth-verbose* nil)
+
 
 (defun xmeth-folder (&aux all)
   (or (and (probe-file "xmethods") (file-directory-p "xmethods"))
@@ -1615,8 +1617,9 @@ Individual tests:
 			    )
 		    (setf xe t))
 		  (setf (second ferr) e)
-		  (when (< 80 (length e)) (setf e (subseq e 0 80)))
-		  (format t    "~&~%ERROR ~A~%~A~%" i e)
+		  (or *xmeth-verbose*
+		      (when (< 80 (length e)) (setf e (subseq e 0 80))))
+		  (format t    "~&~%ERROR ~A~%   ~A~%" i e)
 		  (when (< 50 (length e)) (setf e (subseq e 0 50)))
 		  (let* ((place (if xe
 				    (assoc e *xml-errors* :test #'equal) 

@@ -142,6 +142,28 @@ xmp-run-test-files  scans all file names and types.
 		  (t (test-error nil ,@more)))))
 	 (t  (test-error ,form ,@more)))))))
 
+
+(defmacro xmpt-warning (form &rest more &key matching fail-info &allow-other-keys)
+  (progn
+    (let ((x (member :matching more)))
+      (setf more (mapcon #'(lambda (y)
+			     (cond ((eq y x) nil)
+				   ((eq y (cdr x)) nil)
+				   (t (list (car y)))))
+			 more)))
+    `(multiple-value-bind (v e w)
+	 (let (ww)
+	   (handler-bind 
+	    ((warning (lambda (w) (setq ww w))))
+	    (multiple-value-bind (vv ee) (ignore-errors (multiple-value-list ,form))
+	      (values vv ee ww))))
+       (when (and e *xmpt-errorp*) (xmpt-report ,fail-info e))
+       (if (and w (or (null ,matching) (match-re ,matching (format nil "~A" w))))
+	   (xmptr (test-error (error (format nil "found the warning")) ,@more))
+	 (xmptr (test-error nil ,@more))))))
+
+
+
 (defvar *wsdl-def*)
 (defun xmp-run-test-files (&key one keep verbose syntax break)
   ;; break -> nil    --- do not stop for anything

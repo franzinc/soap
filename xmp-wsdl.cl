@@ -30,8 +30,7 @@
 ;;   - Generate server code from decoded data.
 ;;            make-server-interface
 ;;               -> wsdl-gen-interface (was wsdl-make-interface)
-;;                  ... -> wsdl-gen-operation (was wsdl-bind-operation)
-;;                         ... -> wsdl-gen-element (was wsdl-do-element)
+;;                  ... -> wsdl-gen-for-operation (was wsdl-bind-operation)
 ;; 
 ;;   - Create a WSDL definition file from a Lisp 
 ;;                   server definition.
@@ -68,7 +67,8 @@
 ;;      with sub-elements specified by parts.
 ;;
 ;;
-;; style="document"    portType/operation name="methodName"
+;; style="document" document-literal convention
+;;                  portType/operation name="methodName"
 ;; <W:message name="nameMentionedInPortTypeOnly">
 ;;     <W:part name="dummy" element="elementName" />
 ;;     ...
@@ -78,9 +78,12 @@
 ;;
 ;; 
 ;; style="document" document-literal-wrapped convention
+;;                   portType/operation name="methodName"
 ;; <W:message name="nameMentionedInPortTypeOnly">
-;;     <W:part name="dummy" element="singleTopElementWrapperName" />
+;;     <W:part name="dummy" element="methodName" />
 ;; </W:message>
+;; SOAP Body is the "methodName" element.
+;;
 ;;
 ;; <W:portType name="">
 ;;     <W:operation name="">
@@ -225,6 +228,7 @@
   )
 
 (defvar *wsdl-debug* nil)
+(defvar *wsdl-observe* nil)
 
 
 (defun define-wsdl-names ()
@@ -847,7 +851,9 @@
 				 (schema-decoded-attribute address "location")))
 			  (otherwise (schema-component-name spart)))
 			ports)))))
-	  (push (cons (schema-component-name sdef) (reverse ports)) services))
+	  (push (cons (schema-component-name sdef) (reverse ports)) services)
+	  (setq ports nil)  ;;; mm 2014-10 -- fix this bug sitting here forever!
+	  )
 	(reverse services))
       (mapcar 'schema-component-name (cdr (wsdl-services conn)))))
 
@@ -1181,7 +1187,7 @@
 	  (case kind (:type    (lookup conn name recursive d))))
 	))))
 		   
-(defmethod wsdl-message-part-parts ((conn wsdl-file-connector) part)
+(defmethod wsdl-message-part-parts ((conn wsdl-file-connector) part &optional name-only)
   (let* ((name (schema-decoded-attribute part "name"))
 	 (type (schema-decoded-attribute part "type"))
 	 (elt  (schema-decoded-attribute part "element"))
@@ -1196,19 +1202,18 @@
 	    ;; This might return a false positive if additional types
 	    ;;  exist in the Lisp environment.
 	    ((xmp-find-type conn elt :in) (values name elt))
-	    (t (error "cannot find message element def ~S" part))))
-     (t (error "strange message part ~S" part)))))
+	    (name-only (values elt nil))
+	    (t (error "cannot find message element def ~S" (schema-listify part)))))
+     (name-only (values (or elt name) nil))
+     (t (error "strange message part ~S" (schema-listify part))))))
 
-
-(defmethod wsdl-message-part-element ((conn wsdl-file-connector) part)
-  (wsdl-message-part-parts conn part))
-
+#+ignore
 (defmethod wsdl-gen-element
   (conn style    ;;; SOAP style attribute: "document" | "rpc" 
 	method-name-spec  ;;; name attribute of <operation> in <binding>
 	                  ;;; or (response-name renamed-resp-name)
 	action   ;;; soapAction attribute
-	intern-name   ;;; nil | t | :doc
+	in-msg-p
 	bind     ;;; <input> or <output> in <operation> in <binding>
 	msg      ;;; <message> definition for bind elt
 	&aux
@@ -1232,7 +1237,7 @@
 	(npk (when ns (net.xmp::xmp-uri-to-package conn ns :dns)))
 	pk
 	(pktag "tns")
-	def-tail tail-props msg-type elt def nillable)
+	def-tail tail-props msg-type elt def nillable new-def)
 
   (or (let* ((tg (wsdl-targets conn)) pk2)
 
@@ -1267,7 +1272,7 @@
   (setf tail-props (append (when ns (list :namespaces))
 			   (when estyle (list :encoding))
 			   (when action (list :action))))
-  (when intern-name
+  (when in-msg-p
     (setf method-name (etypecase method-wsdl-name
 			(symbol method-wsdl-name)
 			(string (if pk
@@ -1275,117 +1280,406 @@
 				  method-wsdl-name)))))
   (when (schema-true-p (schema-decoded-attribute msg "nillable"))
     (setf nillable (list :nillable t)))
-
-  (values
-   (cond
-    ((string-equal style "rpc")
+  
+  (when (setq new-def
+	      (cond
+	       ((string-equal style "rpc")
      
-     ;; Operation name is method name, each part is a parameter
-     ;; SOAP method call and response are always structs.
+		;; Operation name is method name, each part is a parameter
+		;; SOAP method call and response are always structs.
 
-     (let ((mname method-name)
-	   (mtype (wsdl-parts-to-type conn msg :options def-tail))
-	   overload)
-       (when (wsdl-lookup conn :element mname nil)
-	 (let ((i 1)
-	       (pk (when (symbolp mname) (symbol-package mname)))
-	       mn)
-	   ;; This element was already defined once - this is an
-	   ;; overloaded operation.  We need to define a new type
-	   ;; name for the overloaded operations.
-	   (or (when (consp method-name-spec)
-		 ;; Try to use the message name as an alternate name
-		 ;;  for reply elements
-		 (setf mn (schema-component-name msg))
-		 (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
-		 (if (wsdl-lookup conn :type mn nil)
-		     nil
-		   (setf method-name mn)))
-	       (when (setf mn method-rename)
-		 (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
-		 (if (wsdl-lookup conn :type mn nil)
-		     nil
-		   (setf method-name mn)))
-	       (loop (setf mn (format nil "~A_~A" method-wsdl-name i))
-		     (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
-		     (if (wsdl-lookup conn :type mn nil)
-			 (incf i)
-		       (return (setf method-name mn)))))
-	   (when (atom method-name-spec)
-	     (push method-name (wsdl-overloaded-ops conn))
-	     (setf overload t)
-	     )))
-       (if overload
-	   `(define-soap-type nil ,(qt method-name)
-	      '(:complex
-		(:seq (:element ,mname ,(copy-tree mtype) ,@nillable))
-		,@(copy-tree def-tail)))
-	 `(define-soap-element nil ,(qt method-name) ,(qt (copy-tree mtype)) ,@nillable))
-       ))
+		(let ((mname method-name)
+		      (mtype (wsdl-parts-to-type conn msg :options def-tail))
+		      overload)
+		  (when (wsdl-lookup conn :element mname nil)
+		    (let ((i 1)
+			  (pk (when (symbolp mname) (symbol-package mname)))
+			  mn)
+		      ;; This element was already defined once - this is an
+		      ;; overloaded operation.  We need to define a new type
+		      ;; name for the overloaded operations.
+		      (or (when (consp method-name-spec)
+			    ;; Try to use the message name as an alternate name
+			    ;;  for reply elements
+			    (setf mn (schema-component-name msg))
+			    (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
+			    (if (wsdl-lookup conn :type mn nil)
+				nil
+			      (setf method-name mn)))
+			  (when (setf mn method-rename)
+			    (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
+			    (if (wsdl-lookup conn :type mn nil)
+				nil
+			      (setf method-name mn)))
+			  (loop (setf mn (format nil "~A_~A" method-wsdl-name i))
+				(when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
+				(if (wsdl-lookup conn :type mn nil)
+				    (incf i)
+				  (return (setf method-name mn)))))
+		      (when (atom method-name-spec)
+			(push method-name (wsdl-overloaded-ops conn))
+			(setf overload t)
+			)))
+		  (if overload
+		      `(define-soap-type nil ,(qt method-name)
+			 '(:complex
+			   (:seq (:element ,mname ,(copy-tree mtype) ,@nillable))
+			   ,@(copy-tree def-tail)))
+		    `(define-soap-element nil ,(qt method-name) ,(qt (copy-tree mtype)) ,@nillable))
+		  ))
 
-    ((or (string-equal style "document")
-	 (and (null style) parts (null (cdr parts))))
+	       ((or (string-equal style "document")
+		    ;; Is there an example of this kind of WSDL???
+		    (and (null style) parts (null (cdr parts)))
+		    )
+		(when (and (or *wsdl-debug* *wsdl-observe*) (null style))
+		  (format t "~&;WSDL operation with null style: ~S~%" (schema-listify msg)))
 
-     ;; Operation name is the element in the part
-     ;;  and it was already defined in the schema.
+		;; Operation name is the element in the part
+		;;  and it was already defined in the schema.
 
-     (cond 
-      ((cdr parts)
-       (error "Document style message with more than one part: ~S"
-	      (schema-listify msg)))
+		(cond 
+		 ((cdr parts)
+		  #+ignore
+		  (error "Document style message with more than one part: ~S"
+			 (schema-listify msg))
+		  ;; Document-literal style (without a wrapper) -- there is no need
+		  ;;  to generate a type or element def.  The call to call-soap-method
+		  ;;  will get an explicit type def.
+		  )
 
-      ;; usual document  style part has the form
-      ;;   <part name="xxx" element="defined-element" />
-      ((and (setf elt (schema-decoded-attribute (first parts) "element"))
-	    (progn
-	      (if (eq :doc intern-name)
-		  (setf method-name elt)
-		(setf method-name (string elt)))
-	      (multiple-value-setq (msg-type def)
-		(wsdl-lookup conn :element method-name :any))
-	      msg-type)
-	    def)
-       )
+		 ;; document-literal-wrapped style part has the form
+		 ;;   <part name="xxx" element="defined-element" />
+		 ((and (setf elt (schema-decoded-attribute (first parts) "element"))
+		       (let ((elt-name (if in-msg-p
+					   elt
+					 (string elt))))
+			 (when (and (or *wsdl-debug* *wsdl-observe*)
+				    (not (string-equal elt-name method-name)))
+			   (format t "~&;WSDL doc-lit-wrapped op-name=~S  elt-name=~S~%"
+				   method-name elt-name))
+			 (multiple-value-setq (msg-type def)
+			   (wsdl-lookup conn :element elt-name :any))
+			 (when (and msg-type def)
+			   (setq method-name elt-name)
+			   t)))
+		  )
       
-      ;; 14-Jan-05  mm: sometimes document style part has the form
-      ;;     <part element="ignored-name" type="defined-type" />
-      ((and (schema-decoded-attribute (first parts) "type")
-	    (progn
-	      (multiple-value-setq (msg-type def)
-		(wsdl-lookup-type conn (first parts) :complex))
-	      (or (consp msg-type) def)))
-       )
+		 ;; 14-Jan-05  mm: sometimes document style part has the form
+		 ;;     <part element="ignored-name" type="defined-type" />
+		 ((and (schema-decoded-attribute (first parts) "type")
+		       (progn
+			 (multiple-value-setq (msg-type def)
+			   (wsdl-lookup-type conn (first parts) :complex))
+			 (or (consp msg-type) def)))
+		  )
 
-      ((cdr (schema-imports conn))
-       (error "~A~S~A"
-	      "Cannot determine message type in "
-	      (schema-listify msg)
-	      " - type may be defined in included Schema."))
-      (t (error "Cannot determine message type in ~S" (schema-listify msg))))
+		 ((cdr (schema-imports conn))
+		  (warn "~A~S~A~A"
+			 "Cannot determine message type in "
+			 (schema-listify msg)
+			 " - type may be defined in included Schema."
+			 "  Generated code may be incomplete or incorrect."
+			 )
+		  (setq msg-type (setq def nil)))
+		 (t (warn "Cannot determine message type in ~S~A" (schema-listify msg)
+			  "  Generated code may be incomplete or incorrect.")
+		    (setq msg-type (setq def nil))))
+
+		;; We need to update the :namespaces option in the def
+		;;    def is in list of forms to be evaluated...
+
+		(flet ((update (props place tail case)
+			       (dolist (p props (nconc place tail))
+				 (when (getf (cddr place) p)
+				   (error "Multiple definitions (~A) of ~S on ~S in ~S + ~S"
+					  case p method-name place tail)))))
+		  (cond ((consp msg-type) (update tail-props msg-type def-tail 1))
+			(def (cond ((consp (maybe-second (fourth def)))
+				    (update tail-props (maybe-second (fourth def)) def-tail 2)
+				    (setf msg-type (maybe-second (fourth def))))
+				   (t (setf (fourth def)
+					    (qt (list* :simple (maybe-second (fourth def))
+						       def-tail)))
+				      (setf msg-type (maybe-second (fourth def))))))))
+		nil)
+	       (t (error "Unknown message style ~S in ~S." style (schema-listify msg)))
+	       ))
+    (wsdl-index-form conn new-def))
+
+  (values method-name msg-type))
 
 
+(defmethod wsdl-gen-rpc-element
+  ;; SOAP style attribute is "rpc".
+  (conn 
+	method-name-spec  ;;; name attribute of <operation> in <binding>
+	                  ;;; or (response-name renamed-resp-name)
+	action   ;;; soapAction attribute
+	in-msg-p
+	bind     ;;; <input> or <output> in <operation> in <binding>
+	msg      ;;; <message> definition for bind elt
+	&aux
+	(method-wsdl-name (if (consp method-name-spec)
+			      (first method-name-spec)
+			    method-name-spec))
+	(method-rename (and (consp method-name-spec)
+			    (not (eq method-wsdl-name (second method-name-spec)))
+			    (second method-name-spec)))
+	(method-name method-wsdl-name)
+	(mpk (when (symbolp method-name) (symbol-package method-name)))
+	(soap-body (schema-single-part bind :soap-body))
+	(estyle (when soap-body
+		  (schema-decoded-attribute soap-body "encodingStyle")))
+			   
+	;;??? This seems to be use-less?
+	;;(use    (schema-decoded-attribute soap-body "use"))
+			   
+	(ns  (when soap-body (schema-raw-attribute soap-body "namespace")))
+	(npk (when ns (net.xmp::xmp-uri-to-package conn ns :dns)))
+	pk
+	(pktag "tns")
+	def-tail msg-type nillable new-def)
 
-     ;; We need to update the :namespaces option in the def
-     ;;    def is in list of forms to be evaluated...
+  (or (let* ((tg (wsdl-targets conn)) pk2)
 
-     (flet ((update (props place tail case)
-		    (dolist (p props (nconc place tail))
-		      (when (getf (cddr place) p)
-			(error "Multiple definitions (~A) of ~S on ~S in ~S + ~S"
-			       case p method-name place tail)))))
-       (cond ((consp msg-type) (update tail-props msg-type def-tail 1))
-	     (def (cond ((consp (maybe-second (fourth def)))
-			 (update tail-props (maybe-second (fourth def)) def-tail 2)
-			 (setf msg-type (maybe-second (fourth def))))
-			(t (setf (fourth def)
-				 (qt (list* :simple (maybe-second (fourth def))
-					    def-tail)))
-			   (setf msg-type (maybe-second (fourth def))))))))
-     nil)
-    (t (error "Unknown message style ~S in ~S." style (schema-listify msg)))
-    )
+	;; Look in the list of all targetNamespace attributes
+	;; in the definition.
 
-   method-name msg-type))
+	(cond
+
+	 ;; If there is only one targetNamespace
+	 ;;    and it has a package, it is the package of this namespace
+	 ((and (eql 1 (length tg))
+	       (setf pk2 (net.xmp::xmp-uri-to-package conn (first tg) :dns)))
+	  (setf pk pk2))
+
+	 ;; If the method name is a symbol it must be in the right package.
+	 ((setf pk mpk))
+
+	 ;; As a last resort, try to locate the namespace uri, but in that
+	 ;;  case signal a warning.
+	 (t (when ns (setf pk (net.xmp::xmp-uri-to-package conn ns :dns))) nil)
+	 ))			   
+      (when (and ns (null npk)) (pushnew ns (wsdl-undef-ns conn) :test #'string=)))
+  (setf def-tail
+	`(,@(when (and ns npk)
+	      `(:namespaces
+		(nil (,(when npk (intern (package-name npk) :keyword))
+		      ,pktag
+		      ,ns))))
+	    ,@(when estyle `(:encoding ,estyle))
+	    ,@(when action `(:action ,action))
+	    ))
+  (when in-msg-p
+    (setf method-name (etypecase method-wsdl-name
+			(symbol method-wsdl-name)
+			(string (if pk
+				    (wsdl-make-symbol conn method-wsdl-name nil pk)
+				  method-wsdl-name)))))
+  (when (schema-true-p (schema-decoded-attribute msg "nillable"))
+    (setf nillable (list :nillable t)))
+  
+  (when (setq new-def
+	      (let ()
+     
+		;; Operation name is method name, each part is a parameter
+		;; SOAP method call and response are always structs.
+
+		(let ((mname method-name)
+		      (mtype (wsdl-parts-to-type conn msg :options def-tail))
+		      overload)
+		  (when (wsdl-lookup conn :element mname nil)
+		    (let ((i 1)
+			  (pk (when (symbolp mname) (symbol-package mname)))
+			  mn)
+		      ;; This element was already defined once - this is an
+		      ;; overloaded operation.  We need to define a new type
+		      ;; name for the overloaded operations.
+		      (or (when (consp method-name-spec)
+			    ;; Try to use the message name as an alternate name
+			    ;;  for reply elements
+			    (setf mn (schema-component-name msg))
+			    (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
+			    (if (wsdl-lookup conn :type mn nil)
+				nil
+			      (setf method-name mn)))
+			  (when (setf mn method-rename)
+			    (when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
+			    (if (wsdl-lookup conn :type mn nil)
+				nil
+			      (setf method-name mn)))
+			  (loop (setf mn (format nil "~A_~A" method-wsdl-name i))
+				(when pk (setf mn (wsdl-make-symbol conn mn nil pk)))
+				(if (wsdl-lookup conn :type mn nil)
+				    (incf i)
+				  (return (setf method-name mn)))))
+		      (when (atom method-name-spec)
+			(push method-name (wsdl-overloaded-ops conn))
+			(setf overload t)
+			)))
+		  (if overload
+		      `(define-soap-type nil ,(qt method-name)
+			 '(:complex
+			   (:seq (:element ,mname ,(copy-tree mtype) ,@nillable))
+			   ,@(copy-tree def-tail)))
+		    `(define-soap-element nil ,(qt method-name) ,(qt (copy-tree mtype)) ,@nillable))
+		  )))
+    (wsdl-index-form conn new-def))
+
+  (values method-name msg-type))
+
+
+(defmethod wsdl-gen-doc-element
+  ;; SOAP style attribute is "document".
+  (conn 
+	method-name-spec  ;;; name attribute of <operation> in <binding>
+	                  ;;; or (response-name renamed-resp-name)
+	action   ;;; soapAction attribute
+	in-msg-p
+	bind     ;;; <input> or <output> in <operation> in <binding>
+	msg      ;;; <message> definition for bind elt
+	&aux
+	(method-wsdl-name (if (consp method-name-spec)
+			      (first method-name-spec)
+			    method-name-spec))
+	(method-name method-wsdl-name)
+	(mpk (when (symbolp method-name) (symbol-package method-name)))
+	(parts (when msg (schema-collected-parts msg :message :part)))
+	(soap-body (schema-single-part bind :soap-body))
+	(estyle (when soap-body
+		  (schema-decoded-attribute soap-body "encodingStyle")))
+			   
+	;;??? This seems to be use-less?
+	;;(use    (schema-decoded-attribute soap-body "use"))
+			   
+	(ns  (when soap-body (schema-raw-attribute soap-body "namespace")))
+	(npk (when ns (net.xmp::xmp-uri-to-package conn ns :dns)))
+	pk
+	(pktag "tns")
+	def-tail tail-props msg-type elt def new-def)
+
+  (or (let* ((tg (wsdl-targets conn)) pk2)
+
+	;; Look in the list of all targetNamespace attributes
+	;; in the definition.
+
+	(cond
+
+	 ;; If there is only one targetNamespace
+	 ;;    and it has a package, it is the package of this namespace
+	 ((and (eql 1 (length tg))
+	       (setf pk2 (net.xmp::xmp-uri-to-package conn (first tg) :dns)))
+	  (setf pk pk2))
+
+	 ;; If the method name is a symbol it must be in the right package.
+	 ((setf pk mpk))
+
+	 ;; As a last resort, try to locate the namespace uri, but in that
+	 ;;  case signal a warning.
+	 (t (when ns (setf pk (net.xmp::xmp-uri-to-package conn ns :dns))) nil)
+	 ))			   
+      (when (and ns (null npk)) (pushnew ns (wsdl-undef-ns conn) :test #'string=)))
+  (setf def-tail
+	`(,@(when (and ns npk)
+	      `(:namespaces
+		(nil (,(when npk (intern (package-name npk) :keyword))
+		      ,pktag
+		      ,ns))))
+	    ,@(when estyle `(:encoding ,estyle))
+	    ,@(when action `(:action ,action))
+	    ))
+  (setf tail-props (append (when ns (list :namespaces))
+			   (when estyle (list :encoding))
+			   (when action (list :action))))
+  (when in-msg-p
+    (setf method-name (etypecase method-wsdl-name
+			(symbol method-wsdl-name)
+			(string (if pk
+				    (wsdl-make-symbol conn method-wsdl-name nil pk)
+				  method-wsdl-name)))))
+
+  ;; Include this in def-tail or tail-props???
+  #+ignore
+  (when (schema-true-p (schema-decoded-attribute msg "nillable"))
+    (setf nillable (list :nillable t)))
+  
+  (when (setq new-def
+	      (let ()
+
+		;; Operation name is the element in the part
+		;;  and it was already defined in the schema.
+
+		(cond 
+		 ((cdr parts)
+		  #+ignore
+		  (error "Document style message with more than one part: ~S"
+			 (schema-listify msg))
+		  ;; Document-literal style (without a wrapper) -- there is no need
+		  ;;  to generate a type or element def.  The call to call-soap-method
+		  ;;  will get an explicit type def.
+		  )
+
+		 ;; document-literal-wrapped style part has the form
+		 ;;   <part name="xxx" element="defined-element" />
+		 ((and (setf elt (schema-decoded-attribute (first parts) "element"))
+		       (let ((elt-name (if in-msg-p
+					   elt
+					 (string elt))))
+			 (when (and (or *wsdl-debug* *wsdl-observe*)
+				    (not (string-equal elt-name method-name)))
+			   (format t "~&;WSDL doc-lit-wrapped op-name=~S  elt-name=~S~%"
+				   method-name elt-name))
+			 (multiple-value-setq (msg-type def)
+			   (wsdl-lookup conn :element elt-name :any))
+			 (when (and msg-type def)
+			   (setq method-name elt-name)
+			   t)))
+		  )
+      
+		 ;; 14-Jan-05  mm: sometimes document style part has the form
+		 ;;     <part element="ignored-name" type="defined-type" />
+		 ((and (schema-decoded-attribute (first parts) "type")
+		       (progn
+			 (multiple-value-setq (msg-type def)
+			   (wsdl-lookup-type conn (first parts) :complex))
+			 (or (consp msg-type) def)))
+		  )
+
+		 ((cdr (schema-imports conn))
+		  (warn "~A~S~A~A"
+			 "Cannot determine message type in "
+			 (schema-listify msg)
+			 " - type may be defined in included Schema."
+			 "  Generated code may be incomplete or incorrect."
+			 )
+		  (setq msg-type (setq def nil)))
+		 (t (warn "Cannot determine message type in ~S~A" (schema-listify msg)
+			  "  Generated code may be incomplete or incorrect.")
+		    (setq msg-type (setq def nil))))
+
+		;; We need to update the :namespaces option in the def
+		;;    def is in list of forms to be evaluated...
+
+		(flet ((update (props place tail case)
+			       (dolist (p props (nconc place tail))
+				 (when (getf (cddr place) p)
+				   (error "Multiple definitions (~A) of ~S on ~S in ~S + ~S"
+					  case p method-name place tail)))))
+		  (cond ((consp msg-type) (update tail-props msg-type def-tail 1))
+			(def (cond ((consp (maybe-second (fourth def)))
+				    (update tail-props (maybe-second (fourth def)) def-tail 2)
+				    (setf msg-type (maybe-second (fourth def))))
+				   (t (setf (fourth def)
+					    (qt (list* :simple (maybe-second (fourth def))
+						       def-tail)))
+				      (setf msg-type (maybe-second (fourth def))))))))
+		nil))
+    (wsdl-index-form conn new-def))
+
+  (values method-name msg-type))
+
+
 
 (defmethod wsdl-response-name ((conn wsdl-file-connector) op-name
 			       &aux
@@ -1403,11 +1697,541 @@
 	    (error "Response name must be a named :element: ~S" op-name)))
     (otherwise (error "Response name must be symbol or string: ~S" op-name))))
 
+
 ;; Called to generate Lisp code.
+(defmethod wsdl-gen-for-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
+  ;; Arg b is one operation element from the selected binding instance.
+  (let* ((soap-op  (schema-single-part b :soap-operation))
+	 (style    (or (when soap-op (schema-raw-attribute soap-op "style"))
+		       (wsdl-soap-style conn))))
+    (cond ((string-equal style "document")
+	   (wsdl-gen-doc-operation conn b mode eval prefix suffix))
+	  (t (or (string-equal style "rpc")
+		 (warn "Missing style attribute, assume RPC."))
+	     (wsdl-gen-rpc-operation conn b mode eval prefix suffix)))))
+
+;; Called to generate Lisp code.
+(defmethod wsdl-gen-rpc-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
+  ;; Arg b is one operation element from the selected binding instance.
+  (declare (ignore eval))
+  (flet ((part-name (part) (wsdl-message-part-parts conn part :name-only))
+	 )
+    (let* ((op-name (schema-component-name b))
+	   (soap-op  (schema-single-part b :soap-operation))
+	   (action   (when soap-op (schema-raw-attribute soap-op "soapAction")))
+	   (messages (cdr (wsdl-messages conn)))
+	   (bind-in (schema-single-part b :input))
+	   (bind-out (schema-single-part b :output))
+	   (opdefs   (let (all)
+		       (dolist (op (wsdl-operations conn) all)
+			 (when (equal op-name (schema-component-name op))
+			   (push op all)))))
+	   (opdef  (cond ((null opdefs) (error "Cannot find operation ~A" op-name))
+			 ((null (cdr opdefs)) (first opdefs))
+			 (t
+			  ;; more than one operation - overloaded op name
+			  ;; find the one with matching input or output
+			  ;; Assume that first match is the only match.
+			  (or
+			   (cond (bind-in
+				  (dolist (op opdefs)
+				    (let ((op-in (schema-single-part op :input)))
+				      (and op-in
+					   (equal (schema-component-name bind-in)
+						  (schema-component-name op-in))
+					   (return op)))))
+				 (bind-out
+				  (dolist (op opdefs)
+				    (let ((op-out (schema-single-part op :output)))
+				      (and op-out
+					   (equal (schema-component-name bind-out)
+						  (schema-component-name op-out))
+					   (return op))))))
+			   (error "Cannot find overloaded operation ~A" op-name)))))
+	   (op-in    (schema-single-part opdef :input))
+	   (in-msg-name   (when op-in (schema-decoded-attribute op-in "message")))
+	   (op-out   (schema-single-part opdef :output))
+	   (out-msg-name  (when op-out (schema-decoded-attribute op-out "message")))
+	   (in-msg (when in-msg-name
+		     (or
+		      (schema-lookup-component
+		       conn #'wsdl-messages #'schema-component-name in-msg-name)
+		      (error "Cannot find input message ~A" in-msg-name))))
+	   (in-parts (when in-msg
+		       (schema-collected-parts in-msg :message :part)))
+	   (out-msg (when out-msg-name
+		      (or
+		       (schema-lookup-component
+			conn #'wsdl-messages #'schema-component-name out-msg-name)
+		       (error "Cannot find output message ~A" out-msg-name))))
+	   (out-parts (when out-msg
+			(schema-collected-parts out-msg :message :part)))
+	   (cx (or (when in-msg (position in-msg messages))
+		   ;; If message has no inputs, there will only be the result
+		   ;;  message definition.  Index will be unique since both
+		   ;;  kinds of messages are in the same list.  [bug21863]
+		   (when out-msg (position out-msg messages))))
+	   comment doc-type doc-ret ret-name)
+
+
+      (when *wsdl-debug*
+	(format t "~&;WSDL RPC op=~S in-msg=~S ~S  out-msg=~S ~S~%" 
+		op-name in-msg-name (when in-msg (length in-parts)) 
+		out-msg-name (when out-msg (length out-parts))))
+
+      (let (op-rename op-redef info)
+	(cond
+	 (in-msg
+	  (multiple-value-setq (op-rename doc-type)
+	    (wsdl-gen-rpc-element conn op-name action t bind-in in-msg))
+	  (setq op-redef op-rename)
+	  (when *wsdl-debug*
+	    (format t "~&;WSDL in-msg op-rename=~S  doc-type=~S ~%"
+		    op-rename doc-type))
+	  )
+	 (t 
+	  ;; If there are no arguments, the operation name is already known. [bug21863]
+	  (setq op-rename op-name)
+	  (setq op-redef `(:element ,op-name 
+				    ;; In zero arg case, this type will never be
+				    ;;  used, so any type will do.  [bug21863]
+				    ,(intern "string" (find-package :net.xmp.schema))
+				    ))))
+	(when out-msg
+	  (multiple-value-setq (ret-name doc-ret)
+	    (wsdl-gen-rpc-element
+	     conn 
+	     (list (wsdl-response-name conn op-name) (wsdl-response-name conn op-rename))
+	     nil nil bind-out out-msg))
+	  (when *wsdl-debug*
+	    (format t "~&;WSDL out-msg ret-name=~S  doc-ret=~S  ~%"
+		    ret-name doc-ret))
+	  )
+	;; [bug21863] Generate a client call function if there are arguments _OR_ a reply.
+	(when (or in-msg out-msg);;???  in-out messages notification messages...
+	  (wsdl-index-form
+	   conn
+	   (let* ((def-name (let ((context :call))
+			      (wsdl-compose-parts conn nil (list prefix
+							       (ecase suffix
+								 (:index (incf cx))
+								 (:compose
+								  (setf context nil)
+								  (string op-rename))
+								 (:message op-rename)))
+						  :export t
+						  :context context)))
+		  (one-part (and (eq mode :client)
+				 in-parts
+				 (null (cdr in-parts))
+				 (first in-parts)))
+		  (one-type (when one-part
+			      (schema-decoded-attribute one-part "type")))
+		  (one-def  (and one-type
+				 (cond
+				  ((wsdl-expand-singleton conn)
+				   (and
+				    (setf one-type
+					  (schema-lookup-type conn	one-type))
+				    (setf one-type
+					  (schema-parts-to-type
+					   one-type :error-p nil)))))
+				 (eq :complex (first one-type))
+				 (case (first (second one-type))
+				   ((:seq* :seq :seq1 :set :set1) one-type)
+				   (otherwise nil))))
+		  (in-elts    (if one-def
+				  (mapcar #'(lambda (p)
+					      (or (xmp-pick-name nil p) (gensym)))
+					  (cdr (second  one-def)))
+				(mapcar #'part-name in-parts)))
+		  (key-args   (mapcar #'(lambda (part)
+					  (wsdl-file-local-name conn (string part)))
+				      in-elts))
+		  (arglist (mapcan #'(lambda (elt arg) (list (string elt) arg))
+				   in-elts key-args))
+		  )
+	     (when (not (equal op-name op-rename))
+		 ;; if we have an overloaded rpc message name, we need
+		 ;;  to access through a defined type
+		 (setf arglist `(,(qt op-name) (list ,@arglist))))
+	     (ecase mode
+	       (:client
+		(setf comment
+		      (list (format nil "Send client message ~A " op-name)
+			    op-name))
+		(setf info :top-level)
+		`(defun ,def-name 
+		   (&key ,@key-args)
+		   (let ((,(wsdl-file-local-name conn "conn")
+			  ,(apply #'wsdl-generate-code 
+				  conn mode nil 
+				  'soap-message-client 
+				  (append
+				   (list :url (wsdl-url-name conn)
+					 :message-dns (qt (wsdl-map-name conn)))
+				   (when (cdr out-parts) (list :body-form :many))
+				   ;; Insert body-form opt if mult-part result ???
+				   (wsdl-client-options conn)
+				   ))))
+		     (multiple-value-call
+		      #'values
+		      ,(cond (one-def
+			      ;; RPC style call.
+			      `(call-soap-method ,(wsdl-file-local-name conn "conn")
+						 ,(qt op-redef)
+						 ,(string (part-name one-part))
+						 (list ,@arglist)))
+			     (t
+			      ;; In RPC style, the parts are the arguments and
+			      ;;    op-redef is the method name.			      
+			      `(call-soap-method
+				,(wsdl-file-local-name conn "conn")
+				,(qt op-redef)
+				,@arglist)))
+		      ,(wsdl-file-local-name conn "conn")))))
+	       (:server
+		(let* ((one-ret (and out-parts
+				     (null (cdr out-parts))
+				     (first out-parts)))
+		       (ret-type (when one-ret
+				   (schema-decoded-attribute one-ret "type")))
+		       (ret-def  (and ret-type
+				      (cond
+				       ((wsdl-expand-singleton conn)
+					(and
+					 (setf ret-type
+					       (schema-lookup-type conn ret-type))
+					 (setf ret-type
+					       (schema-parts-to-type
+						ret-type :error-p nil))
+					 (eq :complex (car ret-type))
+					 ret-type)))))
+		       (ret-keys   (if ret-def
+				       (mapcar #'(lambda (part)
+						   (wsdl-file-local-name
+						    conn 
+						    (or (xmp-pick-name nil part)
+							(gensym))
+						    :preserve))
+					       (cdr (second ret-def)))
+				     (mapcar
+				      #'(lambda (part)
+					  (wsdl-file-local-name
+					   conn (part-name part) :preserve))
+				      out-parts)))
+		       (ret-vars (mapcar #'(lambda (r)
+					     (wsdl-file-local-name conn (string r)))
+					 ret-keys))		       
+		       (ret-parts (if ret-def
+				      (mapcan (lambda (part var)
+						(list 
+						 (qt (xmp-pick-name nil part))
+						 var))
+					      (cdr (second  ret-def))
+					      ret-vars
+					      )
+				    (mapcan 
+				     #'(lambda (part var)
+					 (list (qt (part-name part)) var))
+				     out-parts ret-vars)
+				    ))
+		       (key-list (let (r) 
+				   ;; generate w args for server function [bug16269] 
+				   (dotimes (i (length in-elts) (reverse r))
+				     (push (read-from-string (format nil ":k~A " i))
+					   r))))
+		       )
+		  (push `(,(qt op-name) ,(qt in-elts)
+			  ,@(when action (list :action action))
+			  :lisp-name (list ,(qt def-name) ,@key-list)
+			  :return ,(if (eq :symbol (wsdl-option conn :response))
+				       ret-name
+				     (string ret-name))
+			  )
+			(wsdl-server-exports conn))
+		  (setf comment
+			(list* (format nil "Handler for message ~A" op-name)
+			      (mapcar 
+			       #'(lambda (key elt)
+				   (format
+				    nil
+				    "    Keyword argument ~A represents element ~S"
+				    key elt))
+			       key-list in-elts)))
+		  (setf info :top-body)
+		  `(defun ,def-name (&key ,@(mapcar #'(lambda (k) 
+							(wsdl-file-local-name
+							 conn (string k)))
+						    key-list))
+		     (let ,ret-vars
+		       ,(wsdl-generate-code conn mode :method-body op-name)   
+		       ,(if ret-def
+			    `(list ,(string (part-name (first out-parts)))
+				   (list ,@ret-parts))
+			  `(list ,@ret-parts))))
+
+		  ))
+	       ))
+	   :mode mode :info info
+	   :comment comment)))
+      )))
+
+(defmethod wsdl-gen-doc-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
+  ;; Arg b is one operation element from the selected binding instance.
+  (declare (ignore eval))
+  (flet ((part-name (part) (wsdl-message-part-parts conn part :name-only))
+	 )
+    (let* ((op-name (schema-component-name b))
+	   (soap-op  (schema-single-part b :soap-operation))
+	   (action   (when soap-op (schema-raw-attribute soap-op "soapAction")))
+	   (messages (cdr (wsdl-messages conn)))
+	   (bind-in (schema-single-part b :input))
+	   (bind-out (schema-single-part b :output))
+	   (opdefs   (let (all)
+		       (dolist (op (wsdl-operations conn) all)
+			 (when (equal op-name (schema-component-name op))
+			   (push op all)))))
+	   (opdef  (cond ((null opdefs) (error "Cannot find operation ~A" op-name))
+			 ((null (cdr opdefs)) (first opdefs))
+			 (t
+			  ;; more than one operation - overloaded op name
+			  ;; find the one with matching input or output
+			  ;; Assume that first match is the only match.
+			  (or
+			   (cond (bind-in
+				  (dolist (op opdefs)
+				    (let ((op-in (schema-single-part op :input)))
+				      (and op-in
+					   (equal (schema-component-name bind-in)
+						  (schema-component-name op-in))
+					   (return op)))))
+				 (bind-out
+				  (dolist (op opdefs)
+				    (let ((op-out (schema-single-part op :output)))
+				      (and op-out
+					   (equal (schema-component-name bind-out)
+						  (schema-component-name op-out))
+					   (return op))))))
+			   (error "Cannot find overloaded operation ~A" op-name)))))
+	   (op-in    (schema-single-part opdef :input))
+	   (in-msg-name   (when op-in (schema-decoded-attribute op-in "message")))
+	   (op-out   (schema-single-part opdef :output))
+	   (out-msg-name  (when op-out (schema-decoded-attribute op-out "message")))
+	   (in-msg (when in-msg-name
+		     (or
+		      (schema-lookup-component
+		       conn #'wsdl-messages #'schema-component-name in-msg-name)
+		      (error "Cannot find input message ~A" in-msg-name))))
+	   (in-parts (when in-msg
+		       (schema-collected-parts in-msg :message :part)))
+	   (out-msg (when out-msg-name
+		      (or
+		       (schema-lookup-component
+			conn #'wsdl-messages #'schema-component-name out-msg-name)
+		       (error "Cannot find output message ~A" out-msg-name))))
+	   (out-parts (when out-msg
+			(schema-collected-parts out-msg :message :part)))
+	   (cx (or (when in-msg (position in-msg messages))
+		   ;; If message has no inputs, there will only be the result
+		   ;;  message definition.  Index will be unique since both
+		   ;;  kinds of messages are in the same list.  [bug21863]
+		   (when out-msg (position out-msg messages))))
+	   comment doc-type doc-ret ret-name)
+
+
+      (when *wsdl-debug*
+	(format t "~&;WSDL DOC op=~S in-msg=~S ~S  out-msg=~S ~S~%" 
+		op-name in-msg-name (when in-msg (length in-parts)) 
+		out-msg-name (when out-msg (length out-parts))))
+
+      (let (op-rename op-redef info)
+	(cond
+	 (in-msg
+	  (multiple-value-setq (op-rename doc-type)
+	    (wsdl-gen-doc-element conn op-name action t bind-in in-msg))
+	  (setq op-redef op-rename)
+	  (when *wsdl-debug*
+	    (format t "~&;WSDL in-msg op-rename=~S  doc-type=~S ~%"
+		    op-rename doc-type))
+	  )
+	 (t 
+	  ;; If there are no arguments, the operation name is already known. [bug21863]
+	  (setq op-rename op-name)
+	  (setq op-redef `(:element ,op-name 
+				    ;; In zero arg case, this type will never be
+				    ;;  used, so any type will do.  [bug21863]
+				    ,(intern "string" (find-package :net.xmp.schema))
+				    ))))
+	(when out-msg
+	  (multiple-value-setq (ret-name doc-ret)
+	    (wsdl-gen-doc-element
+	     conn
+	     (list (wsdl-response-name conn op-name) (wsdl-response-name conn op-rename))
+	     nil nil bind-out out-msg))
+	  (when *wsdl-debug*
+	    (format t "~&;WSDL out-msg ret-name=~S  doc-ret=~S  ~%"
+		    ret-name doc-ret))
+	  )
+	;; [bug21863] Generate a client call function if there are arguments _OR_ a reply.
+	(when (or in-msg out-msg);;???  in-out messages notification messages...
+	  (wsdl-index-form
+	   conn
+	   (let* ((def-name (let ((context :call))
+			      (wsdl-compose-parts conn nil (list prefix
+							       (ecase suffix
+								 (:index (incf cx))
+								 (:compose
+								  (setf context nil)
+								  (string op-rename))
+								 (:message op-rename)))
+						  :export t
+						  :context context)))
+		  (one-part (and (eq mode :client)
+				 in-parts
+				 (null (cdr in-parts))
+				 (first in-parts)))
+		  (one-type (when one-part
+			      doc-type))
+		  (one-def  (and one-type
+				 (case mode (:client (setf one-type doc-type)))  ;;; nil when :server???
+				 (eq :complex (first one-type))
+				 (case (first (second one-type))
+				   ((:seq* :seq :seq1 :set :set1) one-type)
+				   (otherwise nil))))
+		  (in-elts    (if one-def
+				  (mapcar #'(lambda (p)
+					      (or (xmp-pick-name nil p) (gensym)))
+					  (cdr (second  one-def)))
+				(mapcar #'part-name in-parts)))
+		  (key-args   (mapcar #'(lambda (part)
+					  (wsdl-file-local-name conn (string part)))
+				      in-elts))
+		  (arglist (mapcan #'(lambda (elt arg) (list (string elt) arg))
+				   in-elts key-args))
+		  )
+	     (ecase mode
+	       (:client
+		(setf comment
+		      (list (format nil "Send client message ~A " op-name)
+			    op-name))
+		(setf info :top-level)
+		`(defun ,def-name 
+		   (&key ,@key-args)
+		   (let ((,(wsdl-file-local-name conn "conn")
+			  ,(apply #'wsdl-generate-code 
+				  conn mode nil 
+				  'soap-message-client 
+				  (append
+				   (list :url (wsdl-url-name conn)
+					 :message-dns (qt (wsdl-map-name conn)))
+				   (when (cdr out-parts) (list :body-form :many))
+				   ;; Insert body-form opt if mult-part result ???
+				   (wsdl-client-options conn)
+				   ))))
+		     (multiple-value-call
+		      #'values
+		      ,(cond 
+			     (one-def
+			      ;; In document-literal-wrapped style call we send 
+			      ;;    the one wrapper element.
+			      `(call-soap-method
+				,(wsdl-file-local-name conn "conn")
+				,(qt op-redef)
+				,@arglist))
+			     (t 
+			      ;; Document-literal style without a wrapper.
+			      ;;   Need to send the method name in soapAction  ???
+			      `(call-soap-method
+				  ,(wsdl-file-local-name conn "conn")
+				  '(:complex (:seq ,@in-elts))
+				  ,@arglist)))
+		      ,(wsdl-file-local-name conn "conn")))))
+	       (:server
+		(let* ((one-ret (and out-parts
+				     (null (cdr out-parts))
+				     (first out-parts)))
+		       (ret-type (when one-ret
+				   doc-ret))
+		       (ret-def  (and ret-type
+				      (setf ret-type doc-ret)))
+		       (ret-keys   (if ret-def
+				       (mapcar #'(lambda (part)
+						   (wsdl-file-local-name
+						    conn 
+						    (or (xmp-pick-name nil part)
+							(gensym))
+						    :preserve))
+					       (cdr (second ret-def)))
+				     (mapcar
+				      #'(lambda (part)
+					  (wsdl-file-local-name
+					   conn (part-name part) :preserve))
+				      out-parts)))
+		       (ret-vars (mapcar #'(lambda (r)
+					     (wsdl-file-local-name conn (string r)))
+					 ret-keys))		       
+		       (ret-parts (if ret-def
+				      (mapcan (lambda (part var)
+						(list 
+						 (qt (xmp-pick-name nil part))
+						 var))
+					      (cdr (second  ret-def))
+					      ret-vars
+					      )
+				    (mapcan 
+				     #'(lambda (part var)
+					 (list (qt (part-name part)) var))
+				     out-parts ret-vars)
+				    ))
+		       (key-list (let (r) 
+				   ;; generate w args for server function [bug16269] 
+				   (dotimes (i (length in-elts) (reverse r))
+				     (push (read-from-string (format nil ":k~A " i))
+					   r))))
+		       )
+		  (push `(,(qt op-name) ,(qt in-elts)
+			  ,@(when action (list :action action))
+			  :lisp-name (list ,(qt def-name) ,@key-list)
+			  :return ,(if (eq :symbol (wsdl-option conn :response))
+				       ret-name
+				     (string ret-name))
+			  )
+			(wsdl-server-exports conn))
+		  (setf comment
+			(list* (format nil "Handler for message ~A" op-name)
+			      (mapcar 
+			       #'(lambda (key elt)
+				   (format
+				    nil
+				    "    Keyword argument ~A represents element ~S"
+				    key elt))
+			       key-list in-elts)))
+		  (setf info :top-body)
+		  `(defun ,def-name (&key ,@(mapcar #'(lambda (k) 
+							(wsdl-file-local-name
+							 conn (string k)))
+						    key-list))
+		     (let ,ret-vars
+		       ,(wsdl-generate-code conn mode :method-body op-name)   
+		       (list ,@ret-parts)))
+
+		  ))
+	       ))
+	   :mode mode :info info
+	   :comment comment)))
+      )))
+	   
+
+
+
+
+;; Called to generate Lisp code.
+#+ignore
 (defmethod wsdl-gen-operation ((conn wsdl-file-connector) b mode eval prefix suffix)
   ;; Arg b is one operation element from the selected binding instance.
   (declare (ignore eval))
-  (flet ((part-name (part) (wsdl-message-part-element conn part))
+  (flet ((part-name (part) (wsdl-message-part-parts conn part :name-only))
 	 )
     (let* ((op-name (schema-component-name b))
 	   (soap-op  (schema-single-part b :soap-operation))
@@ -1470,7 +2294,7 @@
 		   ;;  message definition.  Index will be unique since both
 		   ;;  kinds of messages are in the same list.  [bug21863]
 		   (when out-msg (position out-msg messages))))
-	   comment done-form doc-type doc-ret ret-name)
+	   comment doc-type doc-ret ret-name)
 
 
       (when *wsdl-debug*
@@ -1478,21 +2302,15 @@
 		op-name style in-msg-name (when in-msg (length in-parts)) 
 		out-msg-name (when out-msg (length out-parts))))
 
-;;; mm 2014-07-10: stop here ??? ??? ??? ??? 
       (let (op-rename op-redef info)
 	(cond
 	 (in-msg
-	  (multiple-value-setq (done-form op-rename doc-type)
-	    (wsdl-gen-element conn style op-name action
-			     (if (and (eq style-key :document) (eql 1 (length in-parts)))
-				 :doc
-			       t)
-			     bind-in in-msg))
-	  (when done-form (wsdl-index-form conn done-form))
+	  (multiple-value-setq (op-rename doc-type)
+	    (wsdl-gen-element conn style op-name action t bind-in in-msg))
 	  (setq op-redef op-rename)
 	  (when *wsdl-debug*
-	    (format t "~&;WSDL in-msg done-form=~S  op-rename=~S  doc-type=~S ~%"
-		    done-form op-rename doc-type))
+	    (format t "~&;WSDL in-msg op-rename=~S  doc-type=~S ~%"
+		    op-rename doc-type))
 	  )
 	 (t 
 	  ;; If there are no arguments, the operation name is already known. [bug21863]
@@ -1503,15 +2321,14 @@
 				    ,(intern "string" (find-package :net.xmp.schema))
 				    ))))
 	(when out-msg
-	  (multiple-value-setq (done-form ret-name doc-ret)
+	  (multiple-value-setq (ret-name doc-ret)
 	    (wsdl-gen-element
 	     conn style 
 	     (list (wsdl-response-name conn op-name) (wsdl-response-name conn op-rename))
 	     nil nil bind-out out-msg))
-	  (when done-form (wsdl-index-form conn done-form))
 	  (when *wsdl-debug*
-	    (format t "~&;WSDL out-msg done-form=~S  ret-name=~S  doc-ret=~S  ~%"
-		    done-form ret-name doc-ret))
+	    (format t "~&;WSDL out-msg ret-name=~S  doc-ret=~S  ~%"
+		    ret-name doc-ret))
 	  )
 	;; [bug21863] Generate a client call function if there are arguments _OR_ a reply.
 	(when (or in-msg out-msg);;???  in-out messages notification messages...
@@ -1578,22 +2395,37 @@
 			  ,(apply #'wsdl-generate-code 
 				  conn mode nil 
 				  'soap-message-client 
-				  (list*
-				   :url (wsdl-url-name conn)
-				   :message-dns (qt (wsdl-map-name conn))
+				  (append
+				   (list :url (wsdl-url-name conn)
+					 :message-dns (qt (wsdl-map-name conn)))
+				   (when (cdr out-parts) (list :body-form :many))
+				   ;; Insert body-form opt if mult-part result ???
 				   (wsdl-client-options conn)
 				   ))))
 		     (multiple-value-call
 		      #'values
-		      ,(if (and one-def (eq style-key :rpc))
-			   `(call-soap-method ,(wsdl-file-local-name conn "conn")
-					      ,(qt op-redef)
-					      ,(string (part-name one-part))
-					      (list ,@arglist))
-			 `(call-soap-method
-			   ,(wsdl-file-local-name conn "conn")
-			   ,(qt op-redef)
-			   ,@arglist))
+		      ,(cond ((and one-def (eq style-key :rpc))
+			      ;; RPC style call.
+			      `(call-soap-method ,(wsdl-file-local-name conn "conn")
+						 ,(qt op-redef)
+						 ,(string (part-name one-part))
+						 (list ,@arglist)))
+			     ((or one-def (eq style-key :rpc))
+			      ;; In document-literal-wrapped style call we send 
+			      ;;    the one wrapper element.
+			      ;; In RPC style, the parts are the arguments and
+			      ;;    op-redef is the method name.			      
+			      `(call-soap-method
+				,(wsdl-file-local-name conn "conn")
+				,(qt op-redef)
+				,@arglist))
+			     (t 
+			      ;; Document-literal style without a wrapper.
+			      ;;   Need to send the method name in soapAction  ???
+			      `(call-soap-method
+				  ,(wsdl-file-local-name conn "conn")
+				  '(:complex (:seq ,@in-elts))
+				  ,@arglist)))
 		      ,(wsdl-file-local-name conn "conn")))))
 	       (:server
 		(let* ((one-ret (and out-parts
@@ -1720,7 +2552,7 @@
     (if (and sdef pref bname url)
 	(values bname url)
       (if error-p
-	  (error "Cannot find binding name in service ~S" sdef)
+	  (error "Cannot find binding name in service ~S and port ~S" sdef port)
 	nil))))
 
 
@@ -2360,7 +3192,7 @@
 	    (dolist (b (schema-component-content binding))
 	      (case (schema-element-key b)
 		(:operation
-		 (wsdl-gen-operation conn b mode eval prefix suffix)))))
+		 (wsdl-gen-for-operation conn b mode eval prefix suffix)))))
 
 	  (case mode
 	    (:server
