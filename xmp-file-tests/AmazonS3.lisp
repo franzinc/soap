@@ -2,6 +2,8 @@
 (in-package :user)
 (require :xmpt-driver)
 
+;; WSDL file with included Schema file.
+
 (let ((wconn (xmpt-decode-file))
       (out (xmpt-out))
       (out2 (xmpt-out "out2"))
@@ -25,6 +27,8 @@
 		  :fail-info (xmpt-fail-info :make-client-4-import)))
   (xmptr
    (test-no-error (load (compile-file out4))))
+
+  ;; Verify that constructor was generated, and works.
   (xmptr (test-no-error (new-status :code 17)))
   )
 

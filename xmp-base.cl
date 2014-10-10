@@ -55,7 +55,11 @@
    ;;       rfe7512  decode-wsdl-source should accept do-http-request's :protocol kw
    3 1 ;;; delete *soap-version*, soap-version calls xmp-version
    ;;1   ;;; bug21565 wsdl decoder assumes soap-operation is always present
-   2   ;;; bug21863 fix WSDL gen of SOAP call with zero args
+   ;;2   ;;; bug21863 fix WSDL gen of SOAP call with zero args  
+   3   ;;; bug17080 wsdl document style reply may be a simple type
+   ;;      rfe6769  document style WSDL may specify messages with multiple parts
+   ;;      bug21752 WSDL decoder is confused when SOAP message is a simple type
+   ;;      add make-client-interface &key op-is-action
 
    ))
 (defun xmp-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))

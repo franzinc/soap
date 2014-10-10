@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<definitions xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:psaDataSchema="psaDataSchema"
+             xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:tns="urn:psarepository"
+             targetNamespace="urn:psarepository">
+
+    <types>
+        <xsd:schema targetNamespace="urn:psarepository"
+                    elementFormDefault="qualified"
+                    attributeFormDefault="unqualified"
+                >
+            <xsd:import namespace="psaDataSchema" schemaLocation="bug21752.xsd"/>
+
+            <xsd:complexType name="resultStatusType">
+              <xsd:sequence>
+                <xsd:element name="code" type="xsd:int" minOccurs="1" default="0"/>
+                <xsd:element name="message" type="xsd:string" minOccurs="1" default="OK"/>
+              </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:element name="SelectPSAModelData" type="xsd:string"/>
+            <xsd:element name="psaModelId" type="xsd:int"/>
+            <xsd:element name="SelectPSAModelResult" type="tns:SelectPSAModelResultType"/>
+            <xsd:complexType name="SelectPSAModelResultType">
+                <xsd:sequence>
+                    <xsd:element name="resultStatus" type="tns:resultStatusType"/>
+                    <xsd:element name="data" type="psaDataSchema:psaModelType"/>
+                </xsd:sequence>
+            </xsd:complexType>
+
+        </xsd:schema>
+    </types>
+
+    <!-- Definition of input and output parameters for the operation -->
+    <message name="SelectPSAModelRequest">
+        <part name="psaModelId" element="tns:psaModelId" />
+    </message>
+
+    <message name="SelectPSAModelResponse">
+        <part name="SelectPSAModelOut" element="tns:SelectPSAModelResult" />
+    </message>
+
+    <portType name="PSAContentManager">
+
+        <operation name="SelectPSAModel">
+            <input message="tns:SelectPSAModelRequest"/>
+            <output message="tns:SelectPSAModelResponse"/>
+        </operation>
+
+    </portType>
+
+    <binding name="PSAContentManagerBinding" type="tns:PSAContentManager">
+        <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+
+        <operation name="SelectPSAModel">
+            <input>
+                <soap:body use="encoded"
+                encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" />
+            </input>
+            <output>
+                <soap:body use="encoded"
+                           encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" />
+            </output>
+        </operation>
+    </binding>
+
+    <service name="PSARepository">
+        <port name="PSAContentManagerPort" binding="tns:PSAContentManagerBinding">
+            <soap:address location="http://127.0.0.1:8080/services/Repository"/>
+        </port>
+    </service>
+
+
+</definitions>

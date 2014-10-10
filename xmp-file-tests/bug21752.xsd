@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns="psaDataSchema"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace"
+            targetNamespace="psaDataSchema"
+            elementFormDefault="qualified"
+            attributeFormDefault="unqualified"
+            version="0.1">
+    <!-- ================================================== -->
+    <!-- =====  Element Declarations  -->
+    <!-- ================================================== -->
+    <xsd:element name="psaModel" type="psaModelType"/>
+
+    <!-- ================================================== -->
+
+    <!-- ================================================== -->
+    <!-- =====  Complex Type Definitions  -->
+    <!-- ================================================== -->
+
+    <xsd:complexType name="psaModelType">
+        <xsd:annotation>
+            <xsd:documentation>This data type is created based on AMSEC data schema</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element name="id" type="xsd:int" minOccurs="1"/>
+            <xsd:element name="system_id" type="xsd:int"/>
+            <xsd:element name="name" type="xsd:string" />
+            <xsd:element name="createDate" type="xsd:string"/>
+            <xsd:element name="author" type="xsd:string"/>
+            <xsd:element name="version" type="xsd:string"/>
+            <xsd:element name="modelData" type="xsd:string"/>
+            <xsd:element name="description" type="xsd:string"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+</xsd:schema>

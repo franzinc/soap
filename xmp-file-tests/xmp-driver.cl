@@ -89,12 +89,14 @@ xmp-run-test-files  scans all file names and types.
 (defpackage :net.xmp.soap.envelope (:use) (:nicknames :env))
 (defpackage :net.xmp.soap.encoding (:use) (:nicknames :enc))
 
-(defvar *xmpt-name*)
-(defvar *xmpt-wsdl*)
-(defvar *xmpt-out*)
-(defvar *xmpt-cleanup*)
-(defvar *xmpt-syntax*)
-(defvar *xmpt-result*)
+;; Keep these vars global and do not rebind in test driver
+;;  to allow manual running of individual test parts.
+(defvar *xmpt-name* nil)
+(defvar *xmpt-wsdl* nil)
+(defvar *xmpt-out* nil)
+(defvar *xmpt-cleanup* nil)
+(defvar *xmpt-syntax* nil)
+(defvar *xmpt-result* nil)
 (defvar *xmpt-errorp* nil)
 
 (defmacro xmptr (&rest forms &aux (r (gensym)))
@@ -195,15 +197,15 @@ xmp-run-test-files  scans all file names and types.
 		  ((or string symbol) (string-equal one (first name)))
 		  (cons (member (first name) one :test #'string-equal)))
 		)
-	(let* (
-	       (*xmpt-name* (first name))
-	       (*xmpt-wsdl* (namestring (make-pathname :name (first name) :type "wsdl")))
-	       (*xmpt-out*  (namestring
+	(let* ()
+	       (setq *xmpt-name* (first name))
+	       (setq *xmpt-wsdl* (namestring (make-pathname :name (first name) :type "wsdl")))
+	       (setq *xmpt-out*  (namestring
 			     (make-pathname :type "out" :defaults *xmpt-wsdl*)))
-	       (*xmpt-cleanup* nil)
-	       (*xmpt-syntax* syntax)
-	       (*xmpt-result* nil)
-	      )
+	       (setq *xmpt-cleanup* nil)
+	       (setq *xmpt-syntax* syntax)
+	       (setq *xmpt-result* nil)
+
 	  (soap-new-environment)
 	  (when verbose (format t "~&;Begin ~A~%" name))
 	  (xmpt-out "fasl")   ;;; Just in case...
@@ -233,9 +235,15 @@ xmp-run-test-files  scans all file names and types.
 		   (setf *xmpt-result* 1)		   
 		   )))
 	       )
-	    (or keep
-		(dolist (fl *xmpt-cleanup*)
-		  (ignore-errors (delete-file fl))))
+	    (when (null keep)
+	      (dolist (fl *xmpt-cleanup*)
+		(ignore-errors (delete-file fl)))
+	      (setq *xmpt-name* nil)
+	      (setq *xmpt-wsdl* nil)
+	      (setq *xmpt-out* nil)
+	      (setq *xmpt-cleanup* nil)
+	      (setq *xmpt-syntax* nil)
+	      )
 	    )
 	  (when (not (eql *xmpt-result* 1)) (push name failed))
 	  (when verbose (format t "~&;  End ~A ~A~%" name
@@ -275,6 +283,41 @@ xmp-run-test-files  scans all file names and types.
       :fail-info (list* :make-client *xmpt-wsdl* :xml-syntax *xmpt-syntax*)))
     r))
 
+(defun xmpt-find-lines (file &rest lines &aux count pattern line)
+  ;; lines -> [sep] string [sep] string ...
+  ;;   sep -> nil   -- any number of lines
+  ;;       -> n     -- exactly n non-matching lines
+  ;;       -> -n    -- up to n non-matching lines
+  ;;       -- if no separator, strings must match consecutive lines.
+  (if (null lines)
+      t
+    (with-open-file
+     (s file)
+     (loop
+      (cond
+       (pattern)
+       ((null lines) (return (or line t)))
+       ((null (setq pattern (pop lines)))
+	(setq count nil)
+	(setq pattern (pop lines)))
+       ((numberp pattern)
+	(setq count pattern)
+	(setq pattern (pop lines)))
+       ((or (stringp pattern) (consp pattern))
+	(setq count 0))
+       (t (error "bad lines spec")))
+      (when (null (setq line (read-line s nil nil))) (return nil))
+      (cond
+       ((cond
+	 ((stringp pattern) (search pattern line))
+	 ((consp pattern) (dolist (p pattern nil) (when (search p line) (return t)))))
+	(if (and count (< 0 count))
+	    (return nil)
+	  (setq pattern nil)))
+       ((null count))
+       ((eql count 0) (return nil))
+       ((< 0 count) (decf count))
+       (t (incf count)))))))
+      
 
-
-(format t "~&~%;;; xmp-run-test-files &key one keep verbose syntax errorp~%~%")
+(format t "~&~%;;; xmp-run-test-files &key one keep verbose syntax break~%~%")

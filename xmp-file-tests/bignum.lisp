@@ -12,6 +12,12 @@
 
 ;;; COPIED FROM examples/bignum-server.cl
 
+;; Test a SOAP server/client pair generated from Lisp code.
+;; Generate WSDL from Lisp definitions of server.
+;; Generate Lisp client from WSDL.
+;; Test generated client code.
+
+
 (defpackage :net.xmp.schema (:use) (:nicknames :xsd))
 
 
@@ -213,6 +219,7 @@
     (call-soap-method
      client (intern "calculate" pk) "opname" op "num1" n1 "num2" n2)))
 
+;; Test a SOAP server/client pair generated from Lisp code.
 (xmptr
  (test-no-error (bignum-defs :pk :pkm))
  (test-no-error (bignum-start-server :pk :pk :map :pkm))
@@ -230,6 +237,7 @@
 		 :schema
 		 )))
 
+;; Generate WSDL from Lisp definitions.
 (xmptr
  (test-no-error (bignum-gen-wsdl))
  (test-no-error (stop-soap-server *bignum-server*))
@@ -250,6 +258,7 @@
 
 (define-namespace :pkg "pkg" "urn:bignumserver")
 (define-namespace-map :pkgm nil (list :pkg))
+;; Generate Lisp client from WSDL.
 (xmptr
  (test-no-error (bignum-gen-client))
  (test-no-error (bignum-gen-server))
@@ -279,5 +288,6 @@
 	    nil nil "decResult")
 	   :test #'equal))))
   
+;; Test generated client code.
 (bignum-try-gen)
 
