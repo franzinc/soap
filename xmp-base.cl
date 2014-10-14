@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2013 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2014 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -53,13 +53,16 @@
    ;;       bug21405 SOAP fails to encode double-float zero
    ;;       bug17705 wsdl-include-url is defective
    ;;       rfe7512  decode-wsdl-source should accept do-http-request's :protocol kw
-   3 1 ;;; delete *soap-version*, soap-version calls xmp-version
-   ;;1   ;;; bug21565 wsdl decoder assumes soap-operation is always present
-   ;;2   ;;; bug21863 fix WSDL gen of SOAP call with zero args  
-   3   ;;; bug17080 wsdl document style reply may be a simple type
+   3 1 ;;; 3.1.x delete *soap-version*, soap-version calls xmp-version
+   ;;.1   ;;; bug21565 wsdl decoder assumes soap-operation is always present
+   ;;.2   ;;; bug21863 fix WSDL gen of SOAP call with zero args  
+   ;;.3   ;;; bug17080 wsdl document style reply may be a simple type
    ;;      rfe6769  document style WSDL may specify messages with multiple parts
    ;;      bug21752 WSDL decoder is confused when SOAP message is a simple type
    ;;      add make-client-interface &key op-is-action
+   4   ;;; rfe12678  allow SOAP application to see raw XML string
+       ;;; rfe7502   discover the difference between encoded and literal
+       ;;; bug20691  call-soap-method modifies argument data destructively
 
    ))
 (defun xmp-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
@@ -144,6 +147,7 @@
 
    ;; Accessors
    xmp-message-string
+   xmp-received-string
    xmp-expected-elements
    xmp-element-name
    xmp-element-type
@@ -590,6 +594,10 @@
     (message-init   :accessor xmp-message-init
 		    ;; [rfe6307] allow user to specify adjust-array strategy
 		    :initform 500 :initarg :message-init)
+    (received-string :accessor xmp-received-string
+		     ;; [rfe12678] A place to stash the arriving string.
+		     :initform nil :initarg :received-string
+		     :documentation "no-xmp-copy")
     ))
   )
 

@@ -14,4 +14,4 @@
 	   (:strict (error "Detected incorrectly named messages"))
 	   ))))
 
-(xmpt-error (xmeth325) :matching ".*Service with no client functions.*")
+(xmpt-error (xmeth325) :matching "Service with no client functions.*")

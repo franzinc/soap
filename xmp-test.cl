@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: user -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2013 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2014 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -2913,8 +2913,16 @@ Individual tests:
 				h1cont))
 	  (h2 (make-soap-header client `(:element ,h2elt (:simple xsd:|string|))
 				h2cont))
-
 	  )
+
+     ;; Test rfe12678 soap-sent-string  soap-received-string
+     (call-soap-method client '(:element "soap2001body"
+						(:complex
+						 (:seq (:element "body" xsd:|string|))))
+			      "body" 12345)
+     (test t (< 25 (search ">12345</body></soap2001body>" (soap-sent-string client))))
+     (test t (< 25 (search ">12345</return></res000>" (soap-received-string client))))
+
      (soap-add-header client h1)
      (soap-add-header client h2)
      (test nil

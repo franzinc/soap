@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2013 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2014 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -125,6 +125,10 @@
 
 (defmethod xmp-message-send ((conn xmp-aserve-client-string-in-out-connector)
 				   &key headers &allow-other-keys)
+  (setf (xmp-received-string conn)
+	;; Set to nil to avoid confusing old reply for reply
+	;;  of failed http request.
+	nil)
   (multiple-value-bind (s rc)
       (apply 
        'do-http-request
@@ -141,6 +145,8 @@
 			)
        :external-format (xmp-external-format conn)
        (xmp-client-start conn))
+    ;; [rfe12678] Save the received reply string.
+    (setf (xmp-received-string conn) s)
     (case rc
       (200 s)
       (500 s)
@@ -205,9 +211,13 @@
 	  ((xmp-server-lock server))
 	  ;; Make a copy of the server to allow multiple
 	  ;;     aserve worker threads
-	  (xmp-copy server))))
+	  (xmp-copy server)))
+	(req-string (get-request-body request))
+	)
     (setf (aserve-request server) request)
-    (apply 'xmp-server-implementation server (get-request-body request) options)
+    ;; [rfe12678] Save the received request string.
+    (setf (xmp-received-string server) req-string)
+    (apply 'xmp-server-implementation server req-string options)
     (xmp-message-send server :request request :entity entity)))
 
 (defun xmp-header-slot (request slot)

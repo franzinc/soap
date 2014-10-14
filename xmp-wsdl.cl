@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp.soap -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2013 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2014 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -1408,6 +1408,10 @@
 
 		(cond 
 		 ((cdr parts)
+		  (when (or *wsdl-debug* *wsdl-observe*)
+		    (format t "~&;WSDL doc-lit op-name=~S ~A message with ~A parts~%"
+				   method-name (if in-msg-p "client" "reply")
+				   (length parts)))
 		  #+ignore
 		  (error "Document style message with more than one part: ~S"
 			 (schema-listify msg))
@@ -1423,6 +1427,10 @@
 					   elt
 					 (string elt))))
 			 (when (and (or *wsdl-debug* *wsdl-observe*)
+				    ;; We always prefer the element name as the name of 
+				    ;;  the SOAP method (instead of the WSDL operation name).
+				    ;;  This message allows tracking when this occurs.
+				    in-msg-p 
 				    (not (string-equal elt-name method-name)))
 			   (format t "~&;WSDL doc-lit-wrapped op-name=~S  elt-name=~S~%"
 				   method-name elt-name))
@@ -3577,6 +3585,7 @@
 			      target-package
 			      name
 			      (if-exists :supersede)
+			      (use :encoded)   ;;; or :literal [rfe7502]
 			      (transport "http://schemas.xmlsoap.org/soap/http")
 			      &aux (*xmp-warning-leader* "WSDL"))
   
@@ -3735,82 +3744,90 @@
 	     error-messages))
 
 	  ;; Look through the tables normally accessed with xmp-lookup
-	  (dotimes (i 3)
-	    (maphash
-	     #'(lambda (op-elt v)
-		 ;; scan signatures and generate message elements
-		 (dolist (def v)
-		   (let* ((sig (first def))
-			  (action (first sig))
-			  (op-name (string op-elt))
-			  (res (second def))
-			  (inmsg (string op-elt))
-			  (inmsgq (wsdl-make-tname conn op-elt))
-			  (rpos (search "Request" inmsg))
-			  (outmsg (cond ((and rpos
-					      (eql (length inmsg)
-						   (+ rpos
-						      (length "Request"))))
-					 (concatenate 'string
-						      (subseq inmsg 0 rpos)
-						      "Response"))
-					(t (concatenate
-					    'string inmsg "Response"))))
-			  (outmsgq (wsdl-make-tname conn outmsg))
-			  (tns (list "namespace" target-uri))
-			  (body `((,(wsoap "body")
-				   "use" "encoded"
-				   ,@tns
-				   "encodingStyle" 
-				   ,(soap-encoding-style server)
-				   )))
-			  )
-		     (and (null target-package)
-			  (not (symbolp op-elt))
-			  (error
-			   "Message element ~S must be in package of targetNamespace"
-			   op-elt))
-		     (when (or 
-			    ;; default behavior
-			    (null target-package)
-			    ;; skip elements with no package
-			    (and (symbolp op-elt)
-				 ;; skip elements not in target-package
-				 (eq target-package (symbol-package op-elt))))
-		       (when (symbolp op-elt)
-			 (or target-pk
-			     ;; If target package was not specified, then
-			     ;;  just verify that all elements are in the
-			     ;;  same package.
-			     (pushnew
-			      (list target-pk target-prefix target-uri)
-			      used-namespaces :test #'equal)
-			     (setf target-pk (symbol-package op-elt)))
-			 (or (eq target-pk (symbol-package op-elt))
-			     ;; [bug15509]
-			     (error
-			      "Message element is not in targetNamespace: ~S"
-			      op-elt)))
-		       (push `((,(wsdl "operation") "name" ,op-name)
-			       ((,(wsoap "operation") "soapAction" ,(or action "")))
+	  (let* ((tns (list "namespace" target-uri))
+		 (soap-body
+		  (ecase use
+		    ;; [rfe7502] RPC-literal is rare but allowed.
+		    (:encoded `((,(wsoap "body")
+				 "use" "encoded"
+				 ,@tns
+				 "encodingStyle" 
+				 ,(soap-encoding-style server)
+				 )))
+		    (:literal `((,(wsoap "body")
+				 "use" "literal"
+				 ,@tns
+				 ))))))
+	    (dotimes (i 3)
+	      (maphash
+	       #'(lambda (op-elt v)
+		   ;; scan signatures and generate message elements
+		   (dolist (def v)
+		     (let* ((sig (first def))
+			    (action (first sig))
+			    (op-name (string op-elt))
+			    (res (second def))
+			    (inmsg (string op-elt))
+			    (inmsgq (wsdl-make-tname conn op-elt))
+			    (rpos (search "Request" inmsg))
+			    (outmsg (cond ((and rpos
+						(eql (length inmsg)
+						     (+ rpos
+							(length "Request"))))
+					   (concatenate 'string
+							(subseq inmsg 0 rpos)
+							"Response"))
+					  (t (concatenate
+					      'string inmsg "Response"))))
+			    (outmsgq (wsdl-make-tname conn outmsg))
+			    (body (copy-tree soap-body))
+			    )
+		       (and (null target-package)
+			    (not (symbolp op-elt))
+			    (error
+			     "Message element ~S must be in package of targetNamespace"
+			     op-elt))
+		       (when (or 
+			      ;; default behavior
+			      (null target-package)
+			      ;; skip elements with no package
+			      (and (symbolp op-elt)
+				   ;; skip elements not in target-package
+				   (eq target-package (symbol-package op-elt))))
+			 (when (symbolp op-elt)
+			   (or target-pk
+			       ;; If target package was not specified, then
+			       ;;  just verify that all elements are in the
+			       ;;  same package.
+			       (pushnew
+				(list target-pk target-prefix target-uri)
+				used-namespaces :test #'equal)
+			       (setf target-pk (symbol-package op-elt)))
+			   (or (eq target-pk (symbol-package op-elt))
+			       ;; [bug15509]
+			       (error
+				"Message element is not in targetNamespace: ~S"
+				op-elt)))
+			 (push `((,(wsdl "operation") "name" ,op-name)
+				 ((,(wsoap "operation") "soapAction" ,(or action "")))
 				      
-			       (,(wsdl "input") ,body)
-			       (,(wsdl "output") ,body)
-			       )
-			     bind-ops)
-		       (push `((,(wsdl "operation") "name" ,op-name)
-			       ((,(wsdl "input") "message" ,inmsgq))
-			       ((,(wsdl "output") "message" ,outmsgq)))
-			     port-ops)
-		       (push `((,(wsdl "message") "name" ,inmsg)
-			       ,@(wsdl-message-parts conn op-elt))
-			     messages)
-		       (push `((,(wsdl "message") "name" ,outmsg)
-			       ,@(wsdl-message-parts conn res))
-			     messages)
+				 (,(wsdl "input") ,body)
+				 (,(wsdl "output") ,body)
+				 )
+			       bind-ops)
+			 (push `((,(wsdl "operation") "name" ,op-name)
+				 ((,(wsdl "input") "message" ,inmsgq))
+				 ((,(wsdl "output") "message" ,outmsgq)))
+			       port-ops)
+			 (push `((,(wsdl "message") "name" ,inmsg)
+				 ,@(wsdl-message-parts conn op-elt))
+			       messages)
+			 (push `((,(wsdl "message") "name" ,outmsg)
+				 ,@(wsdl-message-parts conn res))
+			       messages)
 
-		       ))))
-	     (aref tables i)))
+			 ))))
+	       (aref tables i))))
 	  (push `((,(wsdl "portType") "name" ,port-name) ,@(reverse port-ops))
 		ports)
 	  (push `((,(wsdl "binding")

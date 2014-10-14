@@ -14,7 +14,10 @@
 			)))
 
   (dolist (f filenames) (load (compile-file (concatenate 'string f ".cl"))))
+
+  ;; This file has the defpatch forms and begins the combined fasl file.
   (compile-file "soap.cl")
+
   (with-open-file
    (out "soap.fasl"
 	;;:element-type '(unsigned-byte 8)
@@ -30,7 +33,10 @@
       (let ((buf (make-array 2048 :element-type '(unsigned-byte 8))))
 	(loop as x = (read-sequence buf in)
 	      until (= x 0)
-	      do (write-sequence buf out :end x)))))))
+	      do (write-sequence buf out :end x))))))
+
+   (compile-file "xmp-test.cl")  
+   )
 
 
 

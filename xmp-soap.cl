@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: net.xmp.soap -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2013 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2014 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -52,6 +52,9 @@
    enable-soap-server
    disable-soap-server
    stop-soap-server
+
+   soap-sent-string             ;;; [rfe12678] 
+   soap-received-string
 
    soap-element
    soap-header
@@ -970,15 +973,16 @@
 	      (drop (name)
 		    (if (eq name (first parts))
 			(setf parts (cddr parts))
-		      (do ((tl parts (cddr tl)))
+		      (do ((tl (setq parts
+				     ;; Do not modify input list [bug20691]
+				     (append parts nil))
+			       (cddr tl)))
 			  ((atom (cddr tl)))
 			(when (eq name (third tl))
 			  (setf (cddr tl) (cddddr tl))
 			  (return)))))			
 	      )
        (encode (first cdef) (cdr cdef) (cddr type-res)))
-
-
 
      )))
 
@@ -2617,6 +2621,13 @@
   (if (or t-p top)
       (call-next-method)
     (call-next-method conn r name more :top (soap-message-body conn))))
+
+;; Accessors for rfe12678.
+(defmethod soap-sent-string ((conn soap-connector))
+  ;; Make a copy because this slot may be modified by subsequent internal calls.
+  (concatenate 'string (xmp-message-string conn) ""))
+(defmethod soap-received-string ((conn soap-connector))
+  (xmp-received-string conn))
 
 
 (defmethod soap-result-internal ((conn t) r name more &key top refp

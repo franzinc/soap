@@ -1,7 +1,7 @@
 ;; -*- mode: common-lisp; package: user -*-
 ;;
 ;; copyright (c) 2003 Franz Inc, Berkeley, CA - All rights reserved.
-;; copyright (c) 2003-2013 Franz Inc, Oakland, CA - All rights reserved.
+;; copyright (c) 2003-2014 Franz Inc, Oakland, CA - All rights reserved.
 ;;
 ;; The software, data and information contained herein are proprietary
 ;; to, and comprise valuable trade secrets of, Franz, Inc.  They are
@@ -23,8 +23,9 @@
 ;; THE BUILD SCRIPT IS IN build.cl.
 
 #+(version= 9 0)
-(sys:defpatch "soap" 3 
-  "v3: generate zero arg calls from WSDL;
+(sys:defpatch "soap" 4
+  "v4: several updates for WSDL document style;
+v3: generate zero arg calls from WSDL;
 v2: avoid no-applicable-method error for schema-raw-attribute;
 v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :type :system
