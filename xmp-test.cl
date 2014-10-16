@@ -23,6 +23,15 @@
 
 (in-package :user)
 
+(eval-when (compile load eval)
+  (defvar *xmp-test-case-mode* (macrolet ((cm () *current-case-mode*)) (cm)))
+  )
+
+(eval-when (load eval)
+  (or (eq *xmp-test-case-mode* *current-case-mode*)
+      (cerror "load anyway!" "This file xmptest.cl must be compiled in the run-time case mode."))
+  )
+
 #|
 
 ----- TESTING PROCEDURE (of sorts) -- run on alisp AND mlisp -----
@@ -2589,7 +2598,8 @@ Individual tests:
 	   (or
 	    (eq expected :call-error)
 	    (eq res :unset)
-	    (test expected res :test #'equal
+	    ;; Test with equalp to allow cross-case-compiled test file.
+	    (test expected res :test #'equalp  
 		  :fail-info (list* key j :default parts))
 	    (setf ok nil))
 	   

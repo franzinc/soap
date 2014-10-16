@@ -7,10 +7,10 @@
 (define-soap-type nil :nested
   '(:complex
       (:seq1
-         (:element "id" xs:string)
+         (:element "id" xs:|string|)
          (:or
-            (:element "children" xs:string)
-            (:element "verifications" xs:string)
+            (:element "children" xs:|string|)
+            (:element "verifications" xs:|string|)
             ))))
 
 (let ((out (xmpt-out)))

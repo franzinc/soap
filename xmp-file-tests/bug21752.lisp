@@ -16,7 +16,7 @@
    )
   (let ((*soap-client-debug* :stop))
     (multiple-value-bind (a b conn)
-	(bug217521 :|psaModelId| 123)
+	(bug217521 :psaModelId 123)
       (setq a (net.xml.sax:parse-to-lxml (net.xmp:xmp-message-string conn)))
       (setq a (first a))   ;;; get Envelope
       (setq a (second a))  ;;; get Body
