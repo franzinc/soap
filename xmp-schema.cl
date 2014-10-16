@@ -546,7 +546,7 @@
 	 
 
 (defmethod schema-component-to-cpart ((comp schema-component)
-				      &aux ref rdef n (key (schema-element-key comp)))
+				      &aux ref rdef n part (key (schema-element-key comp)))
   (cond
     ((xmp-collector-p nil key)
      (list (schema-component-to-collector comp)))
@@ -555,9 +555,11 @@
       (list* :element 
 	    (list (schema-element-name comp))
 	    (or (schema-decoded-attribute comp "type")
-		(schema-parts-to-type comp :error-p nil)
+		(and (setq part (schema-single-part comp #'any-part-p))
+		     (schema-parts-to-type part :error-p nil))
 		(xmp-any-type nil))
 	    (and (setf n (schema-decoded-attribute comp "nillable"))
+		 ;; Element type maybe discribed in a simpleType content element [bug20703]
 		 (or (equalp n "true") (equal n "1"))
 		 (list :nillable t))
 	    )))
@@ -1310,6 +1312,8 @@
 	(when (eq sub-key (schema-element-key a))
 	  (push a subset)))
     all))
+
+(defun any-part-p (x) (declare (ignore x)) t)
 
 (defmethod schema-single-part ((comp schema-component) key
 			       &key (error-p t) more-p only-p ignored

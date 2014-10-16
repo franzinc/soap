@@ -60,10 +60,11 @@
    ;;      rfe6769  document style WSDL may specify messages with multiple parts
    ;;      bug21752 WSDL decoder is confused when SOAP message is a simple type
    ;;      add make-client-interface &key op-is-action
-   4   ;;; rfe12678  allow SOAP application to see raw XML string
-       ;;; rfe7502   discover the difference between encoded and literal
-       ;;; bug20691  call-soap-method modifies argument data destructively
-
+   ;;4   ;;; rfe12678  allow SOAP application to see raw XML string
+   ;;        rfe7502   discover the difference between encoded and literal
+   ;;        bug20691  call-soap-method modifies argument data destructively
+   5   ;;; bug21649  encode-wsdl-file cannot handle nested collectors
+   ;;      bug20703  restriction on xsd:decimal translates to :any
    ))
 (defun xmp-version (&optional v1-or-s v2 v3 error-p &aux (v1 v1-or-s))
   (typecase v1

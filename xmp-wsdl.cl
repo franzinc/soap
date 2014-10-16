@@ -4117,6 +4117,40 @@
 	 (pushnew type defined-types :test #'equal))
      (or name type))))
 
+(defun wsdl-encode-collector (collector &aux schema min max)
+  (and (consp collector)
+       (case (first collector)
+	 ;;  :seq  ->  sequence min=0 max=1
+	 (:seq (setf schema (xsd "sequence") min 0))
+	 ;;  :seq1 ->  sequence min=1 max=1
+	 (:seq1 (setf schema (xsd "sequence")))
+	 ;;  :seq+ ->  sequence min=1
+	 (:seq+ (setf schema (xsd "sequence") max "unbounded"))
+	 ;;  :seq* ->  sequence min=0
+	 (:seq* (setf schema (xsd "sequence") min 0 max "unbounded"))
+	 ;;  :set  ->  all   min=0 max=1
+	 (:set  (setf schema (xsd "all") min 0))
+	 ;;  :set1 ->  all   min=1 max=1
+	 (:set1 (setf schema (xsd "all")))
+	 ;;  :set+ ->  NA
+	 ;;  :set* ->  NA
+	 ;;  :or ->  choice
+	 (:or (setf schema (xsd "choice")))
+	 )
+       (values schema min max)))
+
+(defmethod wsdl-encode-collector-parts ((conn wsdl-file-connector) collector schema min max)
+  `(,schema 
+    ,@(mapcar #'(lambda (part) (wsdl-encode-type-def 
+				conn nil part
+				:attributes
+				(append
+				 (when min
+				   (list "minOccurs" min))
+				 (when max
+				   (list "maxOccurs" max)))))
+	      (cdr collector))))
+
 (defmethod wsdl-encode-type-def ((conn wsdl-file-connector) name indef
 				 &key attributes
 				 &aux tdef min max schema)
@@ -4147,38 +4181,14 @@
 	   "type" ,(xsd "anyType")
 	   ,@attributes)))
     (:complex
-     (or (case (first (second tdef))
-	   ;;  :seq  ->  sequence min=0 max=1
-	   (:seq (setf schema (xsd "sequence") min 0))
-	   ;;  :seq1 ->  sequence min=1 max=1
-	   (:seq1 (setf schema (xsd "sequence")))
-	   ;;  :seq+ ->  sequence min=1
-	   (:seq+ (setf schema (xsd "sequence") max "unbounded"))
-	   ;;  :seq* ->  sequence min=0
-	   (:seq* (setf schema (xsd "sequence") min 0 max "unbounded"))
-	   ;;  :set  ->  all   min=0 max=1
-	   (:set  (setf schema (xsd "all") min 0))
-	   ;;  :set1 ->  all   min=1 max=1
-	   (:set1 (setf schema (xsd "all")))
-	   ;;  :set+ ->  NA
-	   ;;  :set* ->  NA
-	   ;;  :or ->  choice
-	   (:or (setf schema (xsd "choice")))
-	   )
+     (multiple-value-setq (schema min max)
+       (wsdl-encode-collector (second tdef)))
+     (or schema
 	 (error "Unrecognized type def ~S" tdef))
      `(,(if name
 	    `(,(xsd "complexType") "name" ,(string name))
 	  (xsd "complexType"))
-       (,schema 
-	,@(mapcar #'(lambda (part) (wsdl-encode-type-def 
-				    conn nil part
-				    :attributes
-				    (append
-				     (when min
-				       (list "minOccurs" min))
-				     (when max
-				       (list "maxOccurs" max)))))
-		  (cdr (second tdef))))))
+       ,(wsdl-encode-collector-parts conn (second tdef) schema min max)))
     (:array
      `(,(if name
 	    `(,(xsd "complexType") "name" ,(string name))
@@ -4194,7 +4204,12 @@
      `((,(xsd "simpleType") ,@(when name `("name" ,(string name))) 
 	   "type" ,(second tdef))))
     (otherwise
-     (error "Unrecognized type def ~S ~S" indef tdef)))
+     ;; Collectors may appear nested within collectors [bug21649].
+     (multiple-value-setq (schema min max)
+       (wsdl-encode-collector tdef))
+     (if schema
+	 (wsdl-encode-collector-parts conn tdef schema min max)
+       (error "Unrecognized type def ~S ~S" indef tdef))))
   )
 	     
 
