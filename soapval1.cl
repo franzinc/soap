@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: soapval1.cl,v 2.7 2007/04/17 21:50:41 layer Exp $
 
 ;; SOAP server example
 ;; This example may be submitted to the SOAP validator at http://www.soapware.org/

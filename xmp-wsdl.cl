@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-wsdl.cl,v 2.17 2007/06/25 19:31:30 mm Exp $
 
 ;; WSDL support
 

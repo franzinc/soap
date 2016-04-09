@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-xmlrpc.cl,v 2.3 2007/04/17 21:50:41 layer Exp $
 
 ;; Support for XMLRPC protocol over HTTP.
 

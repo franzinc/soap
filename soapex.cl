@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: soapex.cl,v 2.6 2007/05/01 20:50:38 layer Exp $
 
 ;; SOAP client examples
 

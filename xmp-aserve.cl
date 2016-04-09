@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-aserve.cl,v 2.7 2007/04/17 21:50:41 layer Exp $
 
 ;; Using AllegroServe as the transport layer.
 

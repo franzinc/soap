@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-soap.cl,v 2.17 2009/05/01 16:03:53 layer Exp $
 
 ;; SOAP support
 

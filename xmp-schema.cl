@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-schema.cl,v 2.11 2007/04/17 21:50:41 layer Exp $
 
 ;; XML Schema support
 

@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-test.cl,v 2.15 2009/03/17 18:48:48 mm Exp $
 
 ;; Internal-use test cases
 

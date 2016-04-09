@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: soap.cl,v 2.12 2009/03/17 18:48:48 mm Exp $
 
 ;; Loader that picks the correct fasl for the current case-mode.
 ;; THE BUILD SCRIPT IS IN build.cl.

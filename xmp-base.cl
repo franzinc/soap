@@ -2,7 +2,6 @@
 ;;
 ;; See the file LICENSE for the full license governing this code.
 
-;; $Id: xmp-base.cl,v 2.13 2007/04/17 21:50:41 layer Exp $
 
 ;; Common XML Message Protocol support for SOAP, XMLRPC, and others...
 
