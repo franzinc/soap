@@ -6,6 +6,12 @@
 ;; Loader that picks the correct fasl for the current case-mode.
 ;; THE BUILD SCRIPT IS IN build.cl.
 
+#+(version= 10 0)
+(sys:defpatch "soap" 1
+  "v1: Avoid error when WSDL specifies an empty body."
+  :type :system
+  :post-loadable t)
+
 #+(version= 9 0)
 (sys:defpatch "soap" 4
   "v4: several updates for WSDL document style;
