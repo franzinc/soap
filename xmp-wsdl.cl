@@ -1420,6 +1420,13 @@
 		  ;;  will get an explicit type def.
 		  )
 
+		 ((null parts)
+		  ;; Message without a body [bug24024]
+		  (warn
+		   "Message ~S without a body will probably require modification of client code."
+		   method-name)
+		  nil)
+
 		 ;; document-literal-wrapped style part has the form
 		 ;;   <part name="xxx" element="defined-element" />
 		 ((and (setf elt (schema-decoded-attribute (first parts) "element"))
