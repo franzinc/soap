@@ -14,7 +14,7 @@
 
 #+(version= 9 0)
 (sys:defpatch "soap" 4
-  "v4: several updates for WSDL document style;
+  "v4: Avoid error when WSDL specifies an empty body;
 v3: generate zero arg calls from WSDL;
 v2: avoid no-applicable-method error for schema-raw-attribute;
 v1: decode double-float zero, suppress whitespace, include/import option fixes."
@@ -22,8 +22,9 @@ v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :post-loadable t)
 
 #+(version= 8 2)
-(sys:defpatch "soap" 3 
-  "v3: generate zero arg calls from WSDL;
+(sys:defpatch "soap" 4 
+  "v4: Avoid error when WSDL specifies an empty body;
+v3: generate zero arg calls from WSDL;
 v2: avoid no-applicable-method error for schema-raw-attribute;
 v1: decode double-float zero, suppress whitespace, include/import option fixes."
   :type :system
