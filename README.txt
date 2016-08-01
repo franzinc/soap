@@ -1,5 +1,4 @@
 
-;; $Id: README.txt,v 2.1 2005/08/03 05:09:48 layer Exp $
 
  The SOAP module requires xmlutils version 7.0.1 which has been
  committed on the trunk.  It will signal error if the wrong xmlutils

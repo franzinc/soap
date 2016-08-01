@@ -1,4 +1,3 @@
-# $Id: Makefile,v 2.10 2009/03/17 18:48:48 mm Exp $
 
 include ../../makefile.top
 include ../../makefile.defs
