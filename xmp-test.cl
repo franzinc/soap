@@ -2205,7 +2205,8 @@ Individual tests:
   `(let ((oldlog (ts-alog nil :keep t :set nil)))
      (unwind-protect
 	 (let ()
-	   (ts-alog ,log :keep (if ,new nil t) :set t)
+	   (with-unreachable-code-allowed
+	       (ts-alog ,log :keep (if ,new nil t) :set t))
 	   ,@body)
        (ts-alog oldlog :keep ,keep :set t))))
   
