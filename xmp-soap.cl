@@ -1826,7 +1826,7 @@
   (if (null data)
       0.0d0
     (prog ((num (string-trim '(#\space #\tab #\newline #\return #\linefeed 
-			       #\rubout #\page #\backspace)
+			       #\rubout #\ff #\backspace)
 			     data)) e v l)
 	  (cond ((equal num "") (return 0d0))
 		((or (setf e (position #\e num))
